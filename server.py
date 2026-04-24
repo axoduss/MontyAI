@@ -49,7 +49,7 @@ MAX_AUDIO_SEC    = 30
 
 # ─── SYSTEM PROMPT ───────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """Ti chiami Monty, sei un robot mobile con:
-- 4 LED NeoPixel RGB (striscia WS2812)
+- 4 LED NeoPixel RGB (striscia WS2812, indici 0-3)
 - 2 motori DC con driver DRV8871 (differenziale, 2 ruote)
 - 2 bumper (microswitch finecorsa, sinistro e destro)
 - Microfono e speaker
@@ -73,6 +73,8 @@ Comandi disponibili:
 LED:
 - set_led: accende i LED con colore RGB
   params: { "r": 0-255, "g": 0-255, "b": 0-255 }
+  Per indirizzare un singolo LED, aggiungi "led": 0-3
+  params: { "led": 0, "r": 0-255, "g": 0-255, "b": 0-255 }
 - set_led_off: spegne tutti i LED
   params: {}
 
@@ -93,6 +95,12 @@ Note sui motori:
 - duration_ms: durata in millisecondi. 0 = vai finché non ricevi stop. Default consigliato: 1000-2000
 - Per sicurezza usa SEMPRE una duration_ms > 0, mai movimento infinito
 - Puoi combinare più comandi in sequenza (es. avanti poi gira)
+
+Note sui LED:
+- Senza "led" nel params → imposta TUTTI e 4 i LED allo stesso colore
+- Con "led": 0-3 → imposta SOLO quel LED specifico
+- Per colori diversi su LED diversi, usa più comandi set_led con indici diversi
+- I LED sono numerati da 0 a 3
 
 Esempi:
 Utente: "Vai avanti"
@@ -118,6 +126,15 @@ Utente: "Indietreggia un po'"
 
 Utente: "Accendi il led di rosso"
 {"commands":[{"cmd":"set_led","params":{"r":255,"g":0,"b":0}}],"speech":"LED acceso in rosso!"}
+
+Utente: "Accendi il primo led di blu"
+{"commands":[{"cmd":"set_led","params":{"led":0,"r":0,"g":0,"b":255}}],"speech":"Primo LED blu!"}
+
+Utente: "Accendi il primo led rosso e il terzo verde"
+{"commands":[{"cmd":"set_led","params":{"led":0,"r":255,"g":0,"b":0}},{"cmd":"set_led","params":{"led":2,"r":0,"g":255,"b":0}}],"speech":"Fatto! Rosso e verde!"}
+
+Utente: "Fai i LED tricolore italiano"
+{"commands":[{"cmd":"set_led","params":{"led":0,"r":0,"g":255,"b":0}},{"cmd":"set_led","params":{"led":1,"r":255,"g":255,"b":255}},{"cmd":"set_led","params":{"led":2,"r":255,"g":255,"b":255}},{"cmd":"set_led","params":{"led":3,"r":255,"g":0,"b":0}}],"speech":"Tricolore italiano!"}
 
 Utente: "Spegni i led"
 {"commands":[{"cmd":"set_led_off","params":{}}],"speech":"LED spento."}
@@ -504,7 +521,19 @@ async def execute_command(cmd_obj: dict):
         for ch in ("r", "g", "b"):
             v = params.get(ch, 0)
             params[ch] = max(0, min(255, int(v)))
-        robot.led_color = {"r": params["r"], "g": params["g"], "b": params["b"]}
+        # Validazione indice LED singolo (opzionale)
+        if "led" in params:
+            led_idx = int(params["led"])
+            if 0 <= led_idx <= 3:
+                params["led"] = led_idx
+            else:
+                log.warning("[CMD] Indice LED %d fuori range, rimosso.", led_idx)
+                del params["led"]  # fallback: tutti i LED
+        # Aggiorna stato solo se è "tutti i LED"
+        if "led" not in params:
+            robot.led_color = {"r": params["r"], "g": params["g"], "b": params["b"]}
+        
+        
 
     if cmd == "set_led_off":
         robot.led_color = {"r": 0, "g": 0, "b": 0}

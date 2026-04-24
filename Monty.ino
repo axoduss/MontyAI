@@ -566,12 +566,20 @@ void handleCommand(const char* json) {
     }
 
 
-    setLedColor(r, g, b);
+    //setLedColor(r, g, b);
     userLedOverride = true;
     userLedOverrideUntil = millis() + LED_OVERRIDE_DURATION_MS;
-    char ack[80];
-    snprintf(ack, sizeof(ack),
-      "{\"ack\":\"set_led\",\"r\":%d,\"g\":%d,\"b\":%d}", r, g, b);
+    // ACK con info LED
+    char ack[100];
+    if (doc["params"].containsKey("led")) {
+        int ledIdx = doc["params"]["led"].as<int>();
+        snprintf(ack, sizeof(ack),
+            "{\"ack\":\"set_led\",\"led\":%d,\"r\":%d,\"g\":%d,\"b\":%d}",
+            ledIdx, r, g, b);
+    } else {
+        snprintf(ack, sizeof(ack),
+            "{\"ack\":\"set_led\",\"r\":%d,\"g\":%d,\"b\":%d}", r, g, b);
+    }
     wsCmd.sendTXT(ack);
   }
 
