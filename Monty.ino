@@ -48,8 +48,6 @@ const char* WS_CMD_PATH    = "/cmd";
 #define NEOPIXEL_PIN  48
 #define NEOPIXEL_COUNT 4
 
-
-// ─── DRV8871 - Motori DC ─────────────────────────────────────────────────────
 // Motore sinistro
 #define MOT_L_IN1  GPIO_NUM_19
 #define MOT_L_IN2  GPIO_NUM_20
@@ -494,7 +492,6 @@ void flushTtsQueue() {
  *   "params": { "r": 255, "g": 0, "b": 0 }
  * }
  */
-// ─── GESTIONE COMANDI JSON ────────────────────────────────────────────────────
 void handleCommand(const char* json) {
   Serial.printf("[CMD] Ricevuto: %s\n", json);
 
@@ -765,9 +762,9 @@ void taskSpeaker(void* param) {
       // Chunk ricevuto — riproduci
       if (chunk.data && chunk.length > 0) {
         size_t written = 0;
-        // FIX #8: Usa la lunghezza REALE del chunk, non una costante
+        // Usa la lunghezza REALE del chunk, non una costante
         i2s_write(I2S_SPK_PORT, chunk.data, chunk.length, &written, portMAX_DELAY);
-        // FIX #1: Libera la memoria allocata nel callback wsCmdEvent
+        // Libera la memoria allocata nel callback wsCmdEvent
         free(chunk.data);
         chunk.data = NULL;
 
