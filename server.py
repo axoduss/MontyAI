@@ -14,6 +14,7 @@ Avvio:
     uvicorn server:app --host 0.0.0.0 --port 8765 --reload
 """
 
+
 import os
 import asyncio
 import json
@@ -154,7 +155,7 @@ class RobotState:
                 "ts":   datetime.now().isoformat(),
                 **data
             }
-            # FIX #5: Verifica che ci sia un event loop attivo
+            # Verifica che ci sia un event loop attivo
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 asyncio.create_task(self._broadcast_dashboard(json.dumps(msg)))
@@ -318,7 +319,7 @@ async def synthesize_and_send(text: str):
             pass
 
 
-# ─── FIX #6: INVIO COMANDI SICURO ────────────────────────────────────────────
+# ─── INVIO COMANDI SICURO ────────────────────────────────────────────
 async def safe_send_cmd(payload: str):
     """Invia un messaggio testuale al WebSocket cmd con gestione errori."""
     if robot.cmd_ws:
@@ -331,7 +332,7 @@ async def safe_send_cmd(payload: str):
     return False
             
             
-            # ─── PIPELINE PRINCIPALE ─────────────────────────────────────────────────────
+# ─── PIPELINE PRINCIPALE ─────────────────────────────────────────────────────
 async def run_pipeline(audio_bytes: bytes):
     """Esegue STT → LLM → esecuzione comandi → TTS."""
 
@@ -394,7 +395,7 @@ async def run_pipeline_from_text(text: str):
     await set_robot_state("idle")
 
 
-# ─── FIX #2: SAFE WRAPPERS ───────────────────────────────────────────────────
+# ─── SAFE WRAPPERS ───────────────────────────────────────────────────
 async def safe_run_pipeline(audio_bytes: bytes):
     """Wrapper con gestione errori — il robot non resta mai bloccato."""
     try:
@@ -573,6 +574,14 @@ async def ws_cmd(ws: WebSocket):
                     side = data.get("side", "unknown")
                     log.warning("[BUMPER] Collisione lato: %s", side)
                     robot.log_event("bumper_hit", {"side": side})
+                    # Lancia pipeline LLM con contesto bumper — non bloccare il loop WS
+                    asyncio.create_task(
+                        safe_run_pipeline_from_text(
+                        f"[EVENTO AUTOMATICO] Monty ha appena colpito un ostacolo con il bumper {side}. "
+                        f"Ha già fatto retromarcia e si è allontanato. "
+                        f"Commenta brevemente la situazione in modo spontaneo e un po' ironico."
+                        )
+                    )
 
                 # Eventi motore
                 elif data.get("event") == "motor_timeout":

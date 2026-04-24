@@ -92,7 +92,7 @@ Adafruit_NeoPixel strip(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 // ─── STATE ───────────────────────────────────────────────────────────────────
 enum RobotState { IDLE, LISTENING, PROCESSING, SPEAKING };
 
-// FIX #6: Mutex per proteggere robotState da accessi concorrenti
+// Mutex per proteggere robotState da accessi concorrenti
 SemaphoreHandle_t stateMutex;
 volatile RobotState robotState = IDLE;
 
@@ -447,7 +447,7 @@ void wsCmdEvent(WStype_t type, uint8_t* payload, size_t length) {
       break;
 
     case WStype_BIN: {
-      // FIX #1 + #8: Chunk audio TTS — salva con lunghezza reale
+      //Chunk audio TTS — salva con lunghezza reale
       if (ttsQueue != NULL && length > 0) {
         TtsChunk chunk;
         // Alloca buffer della dimensione ESATTA ricevuta
