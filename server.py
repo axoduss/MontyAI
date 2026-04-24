@@ -48,7 +48,7 @@ OLLAMA_HOST      = "http://127.0.0.1:11434"
 MAX_AUDIO_SEC    = 30
 
 # ─── SYSTEM PROMPT ───────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """Ti chiami Monty, sei il controllore di un robot mobile con:
+SYSTEM_PROMPT = """Ti chiami Monty, sei un robot mobile con:
 - 4 LED NeoPixel RGB (striscia WS2812)
 - 2 motori DC con driver DRV8871 (differenziale, 2 ruote)
 - 2 bumper (microswitch finecorsa, sinistro e destro)
@@ -269,7 +269,7 @@ async def synthesize_and_send(text: str):
 
         log.info("[TTS] Audio generato: %d byte", len(audio_bytes))
 
-        # FIX #3: Invia segnale tts_start all'ESP32
+        # Invia segnale tts_start all'ESP32
         await safe_send_cmd(json.dumps({
             "cmd": "tts_start",
             "params": {"bytes": len(audio_bytes)}
@@ -300,7 +300,7 @@ async def synthesize_and_send(text: str):
                 log.warning("[TTS] Invio chunk %d fallito: %s", chunks_sent, e)
                 break
 
-        # FIX #3: Invia segnale tts_end all'ESP32
+        # Invia segnale tts_end all'ESP32
         await safe_send_cmd(json.dumps({
             "cmd": "tts_end",
             "params": {}
@@ -360,15 +360,37 @@ async def run_pipeline(audio_bytes: bytes):
     robot.log_event("llm_result", {"result": result})
 
     # ── ESEGUI COMANDI ────────────────────────────────────────────────────────
-    for cmd_obj in result.get("commands", []):
-        await execute_command(cmd_obj)
+    # for cmd_obj in result.get("commands", []):
+        # await execute_command(cmd_obj)
 
     # ── TTS ───────────────────────────────────────────────────────────────────
+    # speech = result.get("speech", "")
+    # if speech and robot.cmd_ws:
+        # await set_robot_state("speaking")
+        # robot.log_event("tts_start", {"text": speech})
+        # await synthesize_and_send(speech)
+        # robot.log_event("tts_end", {})
+
+    # await set_robot_state("idle")
+    
+    
+    # ── COMANDI + TTS in parallelo ──
+    commands = result.get("commands", [])
     speech = result.get("speech", "")
+    tasks = []
+
+    if commands:
+        tasks.append(execute_commands_parallel(commands))
+
     if speech and robot.cmd_ws:
         await set_robot_state("speaking")
         robot.log_event("tts_start", {"text": speech})
-        await synthesize_and_send(speech)
+        tasks.append(synthesize_and_send(speech))
+
+    if tasks:
+        await asyncio.gather(*tasks)
+
+    if speech:
         robot.log_event("tts_end", {})
 
     await set_robot_state("idle")
@@ -382,17 +404,42 @@ async def run_pipeline_from_text(text: str):
     result = await process_with_llm(text)
     robot.log_event("llm_result", {"result": result})
 
-    for cmd_obj in result.get("commands", []):
-        await execute_command(cmd_obj)
+    # for cmd_obj in result.get("commands", []):
+        # await execute_command(cmd_obj)
 
+    # speech = result.get("speech", "")
+    # if speech and robot.cmd_ws:
+        # await set_robot_state("speaking")
+        # robot.log_event("tts_start", {"text": speech})
+        # await synthesize_and_send(speech)
+        # robot.log_event("tts_end", {})
+
+    # await set_robot_state("idle")
+
+
+    # ── COMANDI + TTS in parallelo ──
+    commands = result.get("commands", [])
     speech = result.get("speech", "")
+    tasks = []
+
+    if commands:
+        tasks.append(execute_commands_parallel(commands))
+
     if speech and robot.cmd_ws:
         await set_robot_state("speaking")
         robot.log_event("tts_start", {"text": speech})
-        await synthesize_and_send(speech)
+        tasks.append(synthesize_and_send(speech))
+
+    if tasks:
+        await asyncio.gather(*tasks)
+
+    if speech:
         robot.log_event("tts_end", {})
 
     await set_robot_state("idle")
+
+
+
 
 
 # ─── SAFE WRAPPERS ───────────────────────────────────────────────────
@@ -414,7 +461,30 @@ async def safe_run_pipeline_from_text(text: str):
         await set_robot_state("idle")
 
 
+
+# ─── CLASSIFICAZIONE COMANDI ─────────────────────────────────────────────────
+
+COMMAND_CATEGORIES = {
+    "motor": {"move_forward", "move_backward", "turn_left", "turn_right", "stop"},
+    "led":   {"set_led", "set_led_off"},
+    "servo": {"set_servo", "servo_sweep"},       # futuro
+    "sound": {"play_tone", "play_melody"},        # futuro
+}
+
+def classify_command(cmd: str) -> str:
+    for category, cmds in COMMAND_CATEGORIES.items():
+        if cmd in cmds:
+            return category
+    return "system"
+
+
 # ─── ESECUZIONE COMANDI ──────────────────────────────────────────────────────
+
+# Event per abort motori (bumper)
+motor_abort_event = asyncio.Event()
+
+
+
 async def execute_command(cmd_obj: dict):
     """Valida ed invia un comando JSON all'ESP32."""
     cmd    = cmd_obj.get("cmd")
@@ -451,6 +521,114 @@ async def execute_command(cmd_obj: dict):
 
     await safe_send_cmd(payload)
     robot.log_event("command_sent", {"cmd": cmd, "params": params})
+    
+    
+    
+async def execute_commands_parallel(commands: list[dict]):
+    """
+    Raggruppa i comandi per categoria e li esegue:
+      - Categorie diverse → in PARALLELO
+      - Comandi nella stessa categoria → in SEQUENZA (rispettando duration_ms)
+    
+    Esempio LLM output:
+      move_forward 500ms, turn_right 300ms, set_led rosso
+    Risultato:
+      - MOTOR: forward(500ms) → wait → right(300ms) → wait → stop
+      - LED:   set_led rosso (istantaneo)
+      - Entrambi partono INSIEME
+    """
+    if not commands:
+        return
+
+    # Raggruppa per categoria mantenendo l'ordine interno
+    groups: dict[str, list[dict]] = {}
+    for cmd_obj in commands:
+        cat = classify_command(cmd_obj.get("cmd", ""))
+        groups.setdefault(cat, []).append(cmd_obj)
+
+    cats = ", ".join(f"{k}({len(v)})" for k, v in groups.items())
+    log.info("[SEQ] %d comandi → categorie: %s", len(commands), cats)
+
+    # Lancia ogni categoria in parallelo
+    tasks = []
+
+    if "motor" in groups:
+        motor_abort_event.clear()
+        tasks.append(run_motor_sequence(groups["motor"]))
+
+    if "led" in groups:
+        tasks.append(run_led_sequence(groups["led"]))
+
+    if "system" in groups:
+        tasks.append(run_immediate_commands(groups["system"]))
+
+    await asyncio.gather(*tasks)
+    log.info("[SEQ] Tutte le categorie completate.")
+
+
+async def run_motor_sequence(commands: list[dict]):
+    """
+    Esegue comandi motore in sequenza, aspettando duration_ms tra uno e l'altro.
+    Interrompibile da motor_abort_event (bumper).
+    """
+    for i, cmd_obj in enumerate(commands):
+        # Check abort
+        if motor_abort_event.is_set():
+            log.warning("[MOTOR] Sequenza abortita al passo %d/%d", i + 1, len(commands))
+            await execute_command({"cmd": "stop", "params": {}})
+            return
+
+        cmd = cmd_obj.get("cmd", "")
+        params = cmd_obj.get("params", {})
+        duration_ms = params.get("duration_ms", 0)
+
+        # Invia il comando
+        await execute_command(cmd_obj)
+        log.info("[MOTOR] %d/%d: %s (dur=%dms)", i + 1, len(commands), cmd, duration_ms)
+
+        # Aspetta la durata, interrompibile da abort
+        if duration_ms > 0 and cmd != "stop":
+            aborted = await wait_or_abort(duration_ms)
+            if aborted:
+                log.warning("[MOTOR] Abort durante %s", cmd)
+                await execute_command({"cmd": "stop", "params": {}})
+                return
+
+    # Fine sequenza: stop per sicurezza
+    await execute_command({"cmd": "stop", "params": {}})
+    log.info("[MOTOR] Sequenza completata.")
+
+
+async def run_led_sequence(commands: list[dict]):
+    """Esegue comandi LED in sequenza (di solito istantanei)."""
+    for i, cmd_obj in enumerate(commands):
+        await execute_command(cmd_obj)
+        duration_ms = cmd_obj.get("params", {}).get("duration_ms", 0)
+        if duration_ms > 0:
+            await asyncio.sleep(duration_ms / 1000.0)
+        else:
+            await asyncio.sleep(0.02)
+
+
+async def run_immediate_commands(commands: list[dict]):
+    """Esegue comandi system immediatamente."""
+    for cmd_obj in commands:
+        await execute_command(cmd_obj)
+
+
+async def wait_or_abort(duration_ms: int) -> bool:
+    """
+    Aspetta duration_ms millisecondi.
+    Ritorna True se abortito (bumper), False se durata completata.
+    """
+    try:
+        await asyncio.wait_for(
+            motor_abort_event.wait(),
+            timeout=duration_ms / 1000.0
+        )
+        return True   # abort triggerato
+    except asyncio.TimeoutError:
+        return False  # durata completata normalmente
 
 
 # ─── GESTIONE STATO ──────────────────────────────────────────────────────────
@@ -574,6 +752,9 @@ async def ws_cmd(ws: WebSocket):
                     side = data.get("side", "unknown")
                     log.warning("[BUMPER] Collisione lato: %s", side)
                     robot.log_event("bumper_hit", {"side": side})
+                    
+                    motor_abort_event.set()
+                    
                     # Lancia pipeline LLM con contesto bumper — non bloccare il loop WS
                     asyncio.create_task(
                         safe_run_pipeline_from_text(

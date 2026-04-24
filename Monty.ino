@@ -81,6 +81,12 @@ const char* WS_CMD_PATH    = "/cmd";
 #define VAD_SILENCE_MS    1200    // ms silenzio per chiudere utterance
 #define VAD_MIN_SPEECH_MS 300     // ms minimi di parlato valido
 
+
+// ─── POST-TTS COOLDOWN ──────────────────────────────────────────────────────
+volatile uint32_t micEnableAfterMs = 0;  // millis() dopo cui il mic può ascoltare
+#define POST_TTS_COOLDOWN_MS  800        // ms di silenzio forzato dopo TTS (regolabile)
+
+
 // ─── OGGETTI GLOBALI ─────────────────────────────────────────────────────────
 WebSocketsClient wsAudio;   // WebSocket per stream audio → server
 WebSocketsClient wsCmd;     // WebSocket per comandi JSON ← server
@@ -153,6 +159,20 @@ TaskHandle_t taskSpeakerHandle = NULL;
 TaskHandle_t taskStatusHandle  = NULL;
 
 
+// ─── CODA COMANDI ────────────────────────────────────────────────────────────
+// I comandi vengono accodati dal callback WS e processati in un task dedicato
+// Questo evita che handleCommand() blocchi il loop WebSocket
+
+#define CMD_QUEUE_SIZE    16
+#define CMD_MAX_LEN      512
+
+typedef struct {
+  char json[CMD_MAX_LEN];
+} CmdMsg;
+
+QueueHandle_t cmdQueue;
+TaskHandle_t taskCmdHandle = NULL;
+
 
 
 // ─── STATO MOTORI ────────────────────────────────────────────────────────────
@@ -181,6 +201,7 @@ void setupWebSockets();
 void taskMic(void* param);
 void taskSpeaker(void* param);
 void taskStatusLed(void* param);
+void taskCommandProcessor(void* param);
 void wsAudioEvent(WStype_t type, uint8_t* payload, size_t length);
 void wsCmdEvent(WStype_t type, uint8_t* payload, size_t length);
 void handleCommand(const char* json);
@@ -232,6 +253,9 @@ void setup() {
   // Code per comunicazione thread-safe con WebSocket
   audioOutQueue = xQueueCreate(AUDIO_OUT_QUEUE_SIZE, sizeof(AudioOutChunk));
   textOutQueue  = xQueueCreate(TEXT_OUT_QUEUE_SIZE, sizeof(TextOutMsg));
+  
+  // Coda per gestione comandi multipli
+  cmdQueue      = xQueueCreate(CMD_QUEUE_SIZE, sizeof(CmdMsg));
 
   // Task FreeRTOS
   xTaskCreatePinnedToCore(taskMic,       "MicTask",    8192, NULL, 5, &taskMicHandle,     1);
@@ -239,6 +263,8 @@ void setup() {
   xTaskCreatePinnedToCore(taskStatusLed, "LedTask",    4096, NULL, 1, &taskStatusHandle,   0);
   xTaskCreatePinnedToCore(taskMotorWatchdog, "MotTask",  4096, NULL, 3, &taskMotorHandle,  0);
   xTaskCreatePinnedToCore(taskBumperMonitor, "BumpTask", 4096, NULL, 6, &taskBumperHandle, 0);
+  xTaskCreatePinnedToCore(taskCommandProcessor, "CmdTask",  8192, NULL, 7, &taskCmdHandle,      0);
+
 
   setLedColor(0, 5, 0); // verde: pronto
   delay(2000);
@@ -440,9 +466,21 @@ void wsCmdEvent(WStype_t type, uint8_t* payload, size_t length) {
       Serial.println("[WS Cmd] Disconnesso.");
       break;
 
-    case WStype_TEXT:
-      handleCommand((const char*)payload);
+    case WStype_TEXT: {
+      //handleCommand((const char*)payload);
+      if (cmdQueue != NULL && length < CMD_MAX_LEN) {
+        CmdMsg msg;
+        memcpy(msg.json, payload, length);
+        msg.json[length] = '\0';  // null-terminate
+        if (xQueueSend(cmdQueue, &msg, 0) != pdTRUE) {
+          Serial.println("[WS Cmd] WARN: coda comandi piena, comando droppato!");
+        }
+      } else if (length >= CMD_MAX_LEN) {
+        Serial.printf("[WS Cmd] WARN: comando troppo lungo (%d bytes)\n", length);
+      }
       break;
+    }
+  
 
     case WStype_BIN: {
       //Chunk audio TTS — salva con lunghezza reale
@@ -649,6 +687,30 @@ void handleCommand(const char* json) {
   }
 }
 
+
+// ─── TASK: COMMAND PROCESSOR ─────────────────────────────────────────────────
+/*
+ * Processa i comandi dalla coda in un task dedicato.
+ * Vantaggi:
+ *   - Il callback WS ritorna SUBITO → la libreria può ricevere il prossimo msg
+ *   - I comandi vengono processati in ordine FIFO
+ *   - Se un comando è "lento" (es. invio ACK), non blocca la ricezione
+ *   - Priorità 7 = alta, viene eseguito appena c'è un comando in coda
+ */
+void taskCommandProcessor(void* param) {
+  Serial.println("[CMD Task] Avviato.");
+  CmdMsg msg;
+
+  for (;;) {
+    // Blocca finché non arriva un comando (nessun polling, efficiente)
+    if (xQueueReceive(cmdQueue, &msg, portMAX_DELAY) == pdTRUE) {
+      handleCommand(msg.json);
+    }
+  }
+}
+
+
+
 // ─── TASK: MICROFONO + VAD ───────────────────────────────────────────────────
 void taskMic(void* param) {
   static int32_t rawBuf[I2S_DMA_BUF_LEN];
@@ -672,6 +734,18 @@ void taskMic(void* param) {
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
+
+    // *** COOLDOWN POST-TTS: non ascoltare finché non è passato il tempo ***
+    if (millis() < micEnableAfterMs) {
+      // Leggi e scarta i campioni per svuotare il buffer DMA del microfono
+      size_t bytesRead = 0;
+      i2s_read(I2S_MIC_PORT, rawBuf, sizeof(rawBuf), &bytesRead, portMAX_DELAY);
+      // Non processare — stiamo solo drenando il buffer
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+
+
 
     size_t bytesRead = 0;
     i2s_read(I2S_MIC_PORT, rawBuf, sizeof(rawBuf), &bytesRead, portMAX_DELAY);
@@ -796,8 +870,11 @@ void taskSpeaker(void* param) {
           ttsPlaying = false;
           ttsEndReceived = false;
           lastChunkMs = 0;
-          
-          //vTaskDelay(pdMS_TO_TICKS(300)); //evita di ascoltare le ultime parole pronunciate
+
+          // *** COOLDOWN: blocca il microfono per evitare che senta l'eco ***
+          micEnableAfterMs = millis() + POST_TTS_COOLDOWN_MS;
+          Serial.printf("[SPK] TTS completato. Mic cooldown %dms.\n", POST_TTS_COOLDOWN_MS);
+                    
           setState(IDLE);
         }
       }
