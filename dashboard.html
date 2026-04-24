@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROBOT // CONTROL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #080c10;
+    --panel:     #0d1319;
+    --border:    #1a2535;
+    --accent:    #00e5ff;
+    --accent2:   #ff3d71;
+    --accent3:   #39ff87;
+    --dim:       #2a3a4a;
+    --text:      #c8dae8;
+    --text-dim:  #4a6070;
+    --mono:      'Share Tech Mono', monospace;
+    --sans:      'Rajdhani', sans-serif;
+    --radius:    4px;
+    --glow:      0 0 12px rgba(0,229,255,0.35);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ─── SCANLINES ───────────────────────────────── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  /* ─── HEADER ─────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  .logo {
+    font-family: var(--mono);
+    font-size: 18px;
+    color: var(--accent);
+    letter-spacing: 4px;
+    text-shadow: var(--glow);
+  }
+
+  .logo span { color: var(--text-dim); font-size: 12px; letter-spacing: 1px; display: block; margin-top: 2px; }
+
+  .conn-indicators { display: flex; gap: 16px; align-items: center; }
+
+  .ind {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-dim); letter-spacing: 1px;
+  }
+
+  .ind-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--dim);
+    transition: background .4s, box-shadow .4s;
+  }
+  .ind-dot.on {
+    background: var(--accent3);
+    box-shadow: 0 0 8px var(--accent3);
+    animation: pulse-dot 2s infinite;
+  }
+  .ind-dot.err { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+
+  @keyframes pulse-dot {
+    0%,100% { opacity: 1; } 50% { opacity: .5; }
+  }
+
+  /* ─── LAYOUT ─────────────────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: 280px 1fr 320px;
+    grid-template-rows: auto 1fr;
+    gap: 1px;
+    min-height: calc(100vh - 57px);
+    background: var(--border);
+  }
+
+  .panel {
+    background: var(--panel);
+    padding: 20px;
+    overflow-y: auto;
+  }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ─── DIGITAL TWIN ───────────────────────────── */
+  .twin-panel {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 32px 20px;
+    gap: 28px;
+  }
+
+  /* Robot SVG body */
+  .robot-container {
+    position: relative;
+    width: 220px;
+  }
+
+  .robot-svg { width: 100%; }
+
+  /* LED strip visualizer */
+  .led-strip {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+    justify-content: center;
+  }
+
+  .led-dot {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: #111;
+    border: 2px solid var(--border);
+    transition: background .3s, box-shadow .3s;
+    position: relative;
+  }
+
+  .led-dot::after {
+    content: '';
+    position: absolute;
+    top: 4px; left: 6px;
+    width: 8px; height: 5px;
+    background: rgba(255,255,255,0.25);
+    border-radius: 50%;
+    transform: rotate(-30deg);
+  }
+
+  /* State badge */
+  .state-badge {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 3px;
+    padding: 6px 18px;
+    border: 1px solid currentColor;
+    border-radius: var(--radius);
+    text-transform: uppercase;
+    transition: all .3s;
+  }
+
+  .state-idle       { color: var(--accent3);  border-color: var(--accent3);  text-shadow: 0 0 8px var(--accent3); }
+  .state-listening  { color: var(--accent);   border-color: var(--accent);   text-shadow: var(--glow); animation: blink-badge .8s steps(1) infinite; }
+  .state-processing { color: #ffcc00;          border-color: #ffcc00;          text-shadow: 0 0 8px #ffcc00; }
+  .state-speaking   { color: #ff9f43;          border-color: #ff9f43;          text-shadow: 0 0 8px #ff9f43; }
+
+  @keyframes blink-badge { 50% { opacity: .4; } }
+
+  /* Audio VU meter */
+  .vu-meter {
+    display: flex;
+    gap: 3px;
+    align-items: flex-end;
+    height: 40px;
+  }
+  .vu-bar {
+    width: 8px;
+    background: var(--dim);
+    border-radius: 2px 2px 0 0;
+    transition: height .1s;
+  }
+
+  /* ─── LEFT: STATO ────────────────────────────── */
+  .status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .status-row:last-child { border-bottom: none; }
+  .status-key { color: var(--text-dim); }
+  .status-val { color: var(--accent); }
+
+  /* Color preview */
+  .color-preview {
+    width: 18px; height: 18px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+
+  /* ─── RIGHT: COMANDI ─────────────────────────── */
+  .cmd-section { margin-bottom: 20px; }
+  .cmd-section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  /* Color picker LED */
+  .color-wheel-row {
+    display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;
+  }
+
+  .color-swatch {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: transform .15s, border-color .15s;
+  }
+  .color-swatch:hover { transform: scale(1.15); border-color: var(--text); }
+
+  .rgb-sliders { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+
+  .slider-row { display: flex; align-items: center; gap: 8px; }
+  .slider-row label {
+    font-family: var(--mono);
+    font-size: 11px;
+    width: 16px;
+    text-align: center;
+  }
+  .slider-row.r label { color: #ff5252; }
+  .slider-row.g label { color: #69ff47; }
+  .slider-row.b label { color: #40c4ff; }
+
+  input[type=range] {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  .slider-row.r input[type=range] { background: linear-gradient(to right, #111, #ff5252); }
+  .slider-row.g input[type=range] { background: linear-gradient(to right, #111, #69ff47); }
+  .slider-row.b input[type=range] { background: linear-gradient(to right, #111, #40c4ff); }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--text);
+    border: 2px solid var(--bg);
+  }
+
+  .slider-val {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    width: 30px;
+    text-align: right;
+  }
+
+  /* Buttons */
+  .btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 1px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+    text-transform: uppercase;
+  }
+  .btn:hover { background: var(--dim); border-color: var(--accent); color: var(--accent); }
+  .btn-primary {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .btn-primary:hover { background: rgba(0,229,255,.1); }
+  .btn-danger { border-color: var(--accent2); color: var(--accent2); }
+  .btn-danger:hover { background: rgba(255,61,113,.1); }
+
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+  /* Text input */
+  .text-cmd-row {
+    display: flex; gap: 8px;
+  }
+  .text-cmd-input {
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    outline: none;
+    transition: border-color .2s;
+  }
+  .text-cmd-input:focus { border-color: var(--accent); }
+  .text-cmd-input::placeholder { color: var(--text-dim); }
+
+  /* ─── LOG ────────────────────────────────────── */
+  .log-panel {
+    grid-column: 1 / 4;
+    max-height: 200px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    overflow-y: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.6;
+  }
+
+  .log-entry { display: flex; gap: 12px; margin-bottom: 2px; }
+  .log-ts    { color: var(--text-dim); min-width: 85px; }
+  .log-type  { min-width: 140px; }
+  .log-body  { color: var(--text); opacity: .8; }
+
+  .log-type.stt_result    { color: var(--accent3); }
+  .log-type.llm_result    { color: #ffcc00; }
+  .log-type.command_sent  { color: var(--accent); }
+  .log-type.tts_start     { color: #ff9f43; }
+  .log-type.state_change  { color: var(--text-dim); }
+  .log-type.audio_chunk   { color: #2a3a4a; }
+  .log-type.esp32_audio_connected, .log-type.esp32_cmd_connected { color: var(--accent3); }
+  .log-type.esp32_audio_disconnected, .log-type.esp32_cmd_disconnected { color: var(--accent2); }
+  
+  
+    /* ─── MOTORI: D-PAD ──────────────────────────── */
+  .dpad-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin: 12px 0;
+  }
+
+  .dpad-row {
+    display: flex;
+    gap: 4px;
+  }
+
+  .dpad-spacer {
+    width: 64px;
+    height: 64px;
+  }
+
+  .dpad-btn {
+    width: 64px;
+    height: 64px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px;
+    border-color: var(--accent);
+    color: var(--accent);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    transition: background .1s, transform .1s;
+  }
+
+  .dpad-btn span {
+    font-size: 8px;
+    letter-spacing: 2px;
+    margin-top: 4px;
+    opacity: 0.6;
+  }
+
+  .dpad-btn:active,
+  .dpad-btn.active {
+    background: rgba(0, 229, 255, 0.2);
+    transform: scale(0.95);
+  }
+
+  .dpad-center {
+    border-color: var(--accent2) !important;
+    color: var(--accent2) !important;
+    font-size: 14px;
+  }
+
+  .dpad-center:active,
+  .dpad-center.active {
+    background: rgba(255, 61, 113, 0.2);
+  }
+
+  /* ─── MOTORI: BUMPER INDICATORS ──────────────── */
+  .bumper-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 6px 0;
+  }
+
+  .bumper-ind {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .bumper-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--dim);
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+
+  .bumper-dot.hit {
+    background: var(--accent2);
+    box-shadow: 0 0 10px var(--accent2);
+    animation: bumper-flash 0.5s ease-out;
+  }
+
+  @keyframes bumper-flash {
+    0% { transform: scale(1.5); }
+    100% { transform: scale(1); }
+  }
+
+  .motor-speed-display {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 2px;
+  }
+
+  /* ─── MOTORI: SLIDERS ────────────────────────── */
+  .motor-sliders {
+    margin-top: 8px;
+  }
+
+  .motor-slider label {
+    color: var(--accent) !important;
+    width: 30px !important;
+  }
+
+  .motor-slider input[type=range] {
+    background: linear-gradient(to right, var(--dim), var(--accent)) !important;
+  }
+
+  .motor-hint {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    margin-top: 4px;
+    text-align: center;
+  }
+
+  /* ─── MOTORI: PRESET BUTTONS ─────────────────── */
+  .btn-row .btn {
+    flex: 1;
+    text-align: center;
+    font-size: 11px;
+  }
+  
+  
+  
+  
+
+  /* ─── SCROLLBAR ──────────────────────────────── */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 2px; }
+
+  /* ─── RESPONSIVE ─────────────────────────────── */
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: 1fr 1fr; }
+    .twin-panel { grid-column: 1 / 3; }
+    .log-panel  { grid-column: 1 / 3; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    ROBOT//CTRL
+    <span>ESP32-S3 N16R8 · Digital Twin v0.1</span>
+  </div>
+  <div class="conn-indicators">
+    <div class="ind">
+      <div class="ind-dot" id="dot-ws"></div>
+      DASHBOARD WS
+    </div>
+    <div class="ind">
+      <div class="ind-dot" id="dot-audio"></div>
+      ESP32 AUDIO
+    </div>
+    <div class="ind">
+      <div class="ind-dot" id="dot-cmd"></div>
+      ESP32 CMD
+    </div>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- ── LEFT: STATUS ──────────────────────────────── -->
+  <div class="panel" style="grid-column:1; grid-row:1/3;">
+    <div class="panel-title">// STATUS</div>
+
+    <div class="status-row">
+      <span class="status-key">STATO</span>
+      <span class="status-val" id="st-state">—</span>
+    </div>
+    <div class="status-row">
+      <span class="status-key">LED COLOR</span>
+      <span class="status-val">
+        <span class="color-preview" id="st-led-preview"></span>
+        <span id="st-led-val">—</span>
+      </span>
+    </div>
+    <div class="status-row">
+      <span class="status-key">ESP32 AUDIO</span>
+      <span class="status-val" id="st-esp-audio">—</span>
+    </div>
+    <div class="status-row">
+      <span class="status-key">ESP32 CMD</span>
+      <span class="status-val" id="st-esp-cmd">—</span>
+    </div>
+    <div class="status-row">
+      <span class="status-key">DASHBOARD WS</span>
+      <span class="status-val" id="st-ws">—</span>
+    </div>
+
+    <div style="margin-top:24px;">
+      <div class="panel-title">// LAST TRANSCRIPT</div>
+      <div id="last-transcript" style="font-family:var(--mono);font-size:12px;color:var(--accent3);min-height:40px;line-height:1.6;">—</div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <div class="panel-title">// LLM RESPONSE</div>
+      <pre id="last-llm" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);white-space:pre-wrap;word-break:break-all;min-height:60px;">—</pre>
+    </div>
+  </div>
+
+  <!-- ── CENTER: DIGITAL TWIN ──────────────────────── -->
+  <div class="panel twin-panel">
+    <div class="state-badge state-idle" id="state-badge">IDLE</div>
+
+    <!-- Robot SVG semplificato -->
+    <div class="robot-container">
+      <svg class="robot-svg" viewBox="0 0 200 280" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Corpo -->
+        <rect x="45" y="90" width="110" height="100" rx="8" fill="#0d1319" stroke="#1a2535" stroke-width="2"/>
+        <!-- Testa -->
+        <rect x="60" y="30" width="80" height="60" rx="10" fill="#0d1319" stroke="#1a2535" stroke-width="2"/>
+        <!-- Occhi -->
+        <rect x="72" y="46" width="20" height="14" rx="3" fill="#111" id="eye-l"/>
+        <rect x="108" y="46" width="20" height="14" rx="3" fill="#111" id="eye-r"/>
+        <!-- Antenna -->
+        <line x1="100" y1="30" x2="100" y2="14" stroke="#1a2535" stroke-width="2"/>
+        <circle cx="100" cy="11" r="4" fill="#1a2535" id="antenna-dot"/>
+        <!-- Collo -->
+        <rect x="90" y="88" width="20" height="6" rx="2" fill="#1a2535"/>
+        <!-- Griglia corpo -->
+        <rect x="58" y="105" width="35" height="25" rx="3" fill="#111" stroke="#1a2535"/>
+        <rect x="107" y="105" width="35" height="25" rx="3" fill="#111" stroke="#1a2535"/>
+        <rect x="58" y="140" width="84" height="15" rx="3" fill="#111" stroke="#1a2535"/>
+        <!-- Braccia -->
+        <rect x="16" y="95" width="30" height="18" rx="4" fill="#0d1319" stroke="#1a2535" stroke-width="2"/>
+        <rect x="154" y="95" width="30" height="18" rx="4" fill="#0d1319" stroke="#1a2535" stroke-width="2"/>
+        <!-- Ruote (motori) -->
+        <ellipse cx="68" cy="210" rx="22" ry="14" fill="#111" stroke="#1a2535" stroke-width="2" id="wheel-l"/>
+        <ellipse cx="132" cy="210" rx="22" ry="14" fill="#111" stroke="#1a2535" stroke-width="2" id="wheel-r"/>
+        <!-- Pinza -->
+        <rect x="84" y="225" width="32" height="8" rx="3" fill="#0d1319" stroke="#1a2535" stroke-width="1.5" id="gripper"/>
+      </svg>
+    </div>
+
+    <!-- LED strip -->
+    <div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);text-align:center;margin-bottom:8px;letter-spacing:2px;">WS2812 × 4</div>
+      <div class="led-strip" id="led-strip">
+        <div class="led-dot" id="led0"></div>
+        <div class="led-dot" id="led1"></div>
+        <div class="led-dot" id="led2"></div>
+        <div class="led-dot" id="led3"></div>
+      </div>
+    </div>
+
+    <!-- VU meter -->
+    <div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);text-align:center;margin-bottom:8px;letter-spacing:2px;">MIC LEVEL</div>
+      <div class="vu-meter" id="vu-meter">
+        <div class="vu-bar" style="height:4px"></div>
+        <div class="vu-bar" style="height:4px"></div>
+        <div class="vu-bar" style="height:4px"></div>
+        <div class="vu-bar" style="height:4px"></div>
+        <div class="vu-bar" style="height:4px"></div>
+        <div class="vu-bar" style="height:4px"></div>
+        <div class="vu-bar" style="height:4px"></div>
+        <div class="vu-bar" style="height:4px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT: COMANDI ─────────────────────────────── -->
+  <div class="panel" style="grid-column:3; grid-row:1/3;">
+    <div class="panel-title">// COMANDI MANUALI</div>
+
+    <!-- Testo → LLM -->
+    <div class="cmd-section">
+      <div class="cmd-section-label">Text Input → LLM</div>
+      <div class="text-cmd-row">
+        <input type="text" class="text-cmd-input" id="text-input" placeholder="es. vai avanti e accendi il led verde">
+        <button class="btn btn-primary" onclick="sendTextCmd()">▶</button>
+      </div>
+    </div>
+
+    <!-- MOTORI -->
+    <div class="cmd-section">
+      <div class="cmd-section-label">Motori</div>
+
+      <!-- Bumper indicators -->
+      <div class="bumper-row">
+        <div class="bumper-ind" id="bumper-left">
+          <div class="bumper-dot" id="bump-dot-l"></div>
+          BUMP L
+        </div>
+        <div class="motor-speed-display">
+          SPD: <span id="motor-speed-val">150</span>
+        </div>
+        <div class="bumper-ind" id="bumper-right">
+          BUMP R
+          <div class="bumper-dot" id="bump-dot-r"></div>
+        </div>
+      </div>
+
+      <!-- D-Pad controllo motori -->
+      <div class="dpad-container">
+        <div class="dpad-row">
+          <div class="dpad-spacer"></div>
+          <button class="btn dpad-btn dpad-up" onmousedown="motorCmd('move_forward')" onmouseup="motorCmd('stop')" ontouchstart="motorCmd('move_forward')" ontouchend="motorCmd('stop')">▲<span>FWD</span></button>
+          <div class="dpad-spacer"></div>
+        </div>
+        <div class="dpad-row">
+          <button class="btn dpad-btn dpad-left" onmousedown="motorCmd('turn_left')" onmouseup="motorCmd('stop')" ontouchstart="motorCmd('turn_left')" ontouchend="motorCmd('stop')">◄<span>LEFT</span></button>
+          <button class="btn dpad-btn dpad-center btn-danger" onclick="motorCmd('stop')">■<span>STOP</span></button>
+          <button class="btn dpad-btn dpad-right" onmousedown="motorCmd('turn_right')" onmouseup="motorCmd('stop')" ontouchstart="motorCmd('turn_right')" ontouchend="motorCmd('stop')">►<span>RIGHT</span></button>
+        </div>
+        <div class="dpad-row">
+          <div class="dpad-spacer"></div>
+          <button class="btn dpad-btn dpad-down" onmousedown="motorCmd('move_backward')" onmouseup="motorCmd('stop')" ontouchstart="motorCmd('move_backward')" ontouchend="motorCmd('stop')">▼<span>REV</span></button>
+          <div class="dpad-spacer"></div>
+        </div>
+      </div>
+
+      <!-- Speed + Duration sliders -->
+      <div class="motor-sliders">
+        <div class="slider-row motor-slider">
+          <label>SPD</label>
+          <input type="range" min="50" max="255" value="150" id="sl-speed" oninput="updateMotorSliders()">
+          <span class="slider-val" id="sv-speed">150</span>
+        </div>
+        <div class="slider-row motor-slider">
+          <label>DUR</label>
+          <input type="range" min="0" max="5000" value="0" step="100" id="sl-duration" oninput="updateMotorSliders()">
+          <span class="slider-val" id="sv-duration">0</span>
+        </div>
+      </div>
+      <div class="motor-hint">DUR=0: muovi finché tieni premuto</div>
+
+      <!-- Preset movimenti -->
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn" onclick="motorPreset('square')">□ Quadrato</button>
+        <button class="btn" onclick="motorPreset('spin')">↻ Spin</button>
+        <button class="btn" onclick="motorPreset('dance')">♪ Dance</button>
+      </div>
+    </div>
+
+    <!-- LED diretto -->
+    <div class="cmd-section">
+      <div class="cmd-section-label">LED Diretto</div>
+      <div class="color-wheel-row" id="swatches"></div>
+      <div class="rgb-sliders">
+        <div class="slider-row r">
+          <label>R</label>
+          <input type="range" min="0" max="255" value="0" id="sl-r" oninput="updateSlider()">
+          <span class="slider-val" id="sv-r">0</span>
+        </div>
+        <div class="slider-row g">
+          <label>G</label>
+          <input type="range" min="0" max="255" value="0" id="sl-g" oninput="updateSlider()">
+          <span class="slider-val" id="sv-g">0</span>
+        </div>
+        <div class="slider-row b">
+          <label>B</label>
+          <input type="range" min="0" max="255" value="0" id="sl-b" oninput="updateSlider()">
+          <span class="slider-val" id="sv-b">0</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+        <div id="rgb-preview" style="width:36px;height:36px;border-radius:50%;background:#111;border:2px solid var(--border);transition:background .2s;"></div>
+        <div style="flex:1;">
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="sendLed()">INVIA LED</button>
+            <button class="btn btn-danger" onclick="sendLedOff()">OFF</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connessione -->
+    <div class="cmd-section">
+      <div class="cmd-section-label">Server WS</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+        <input type="text" class="text-cmd-input" id="ws-host" value="ws://localhost:8765/dashboard" style="font-size:11px;">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="connectWS()">CONNETTI</button>
+        <button class="btn" onclick="disconnectWS()">DISCONNETTI</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LOG ────────────────────────────────────────── -->
+  <div class="log-panel" id="log-panel">
+    <div class="log-entry">
+      <span class="log-ts">--:--:--</span>
+      <span class="log-type" style="color:var(--text-dim)">dashboard_ready</span>
+      <span class="log-body">Robot Control Dashboard caricata.</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── STATO ───────────────────────────────────────────
+let ws = null;
+let currentLed = { r: 0, g: 0, b: 0 };
+let vuAnimId   = null;
+let vuActive   = false;
+let motorHoldMode = false;  // true quando DUR=0 (muovi finché tieni premuto)
+
+
+const SWATCHES = [
+  { name: 'Rosso',    r: 255, g:  0,  b:  0 },
+  { name: 'Verde',    r:  0,  g: 200, b:  0 },
+  { name: 'Blu',      r:  0,  g:  0,  b: 255 },
+  { name: 'Bianco',   r: 255, g: 255, b: 255 },
+  { name: 'Giallo',   r: 255, g: 180, b:  0 },
+  { name: 'Ciano',    r:  0,  g: 220, b: 220 },
+  { name: 'Viola',    r: 150, g:  0,  b: 255 },
+  { name: 'Arancio',  r: 255, g: 80,  b:  0 },
+  { name: 'Rosa',     r: 255, g:  0,  b: 120 },
+  { name: 'Off',      r:  0,  g:  0,  b:  0 },
+];
+
+// ─── INIT ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  buildSwatches();
+  updateRgbPreview(0, 0, 0);
+  //updateStateBadge('disconnesso');
+  updateState('disconnesso');
+  setDotState('dot-ws', false);
+  updateMotorSliders();
+
+  document.getElementById('text-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendTextCmd();
+  });
+});
+
+function buildSwatches() {
+  const container = document.getElementById('swatches');
+  SWATCHES.forEach(sw => {
+    const div = document.createElement('div');
+    div.className = 'color-swatch';
+    div.title = sw.name;
+    div.style.background = sw.name === 'Off'
+      ? '#111'
+      : `rgb(${sw.r},${sw.g},${sw.b})`;
+    div.addEventListener('click', () => {
+      document.getElementById('sl-r').value = sw.r;
+      document.getElementById('sl-g').value = sw.g;
+      document.getElementById('sl-b').value = sw.b;
+      updateSlider();
+    });
+    container.appendChild(div);
+  });
+}
+
+// ─── WEBSOCKET ────────────────────────────────────────
+function connectWS() {
+  const url = document.getElementById('ws-host').value.trim();
+  if (ws) ws.close();
+
+  log('dashboard_connect', `Connessione a ${url}...`);
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    setDotState('dot-ws', true);
+    document.getElementById('st-ws').textContent = 'OK';
+    log('dashboard_connected', 'WebSocket connessa.');
+  };
+
+  ws.onclose = () => {
+    setDotState('dot-ws', false);
+    document.getElementById('st-ws').textContent = '—';
+    log('dashboard_disconnected', 'WebSocket disconnessa.');
+    ws = null;
+  };
+
+  ws.onerror = () => {
+    setDotState('dot-ws', 'err');
+    log('error', 'Errore WebSocket.');
+  };
+
+  ws.onmessage = e => handleMessage(JSON.parse(e.data));
+}
+
+function disconnectWS() {
+  if (ws) ws.close();
+}
+
+function handleMessage(data) {
+  const type = data.type;
+
+  // Init
+  if (type === 'init') {
+    updateState(data.state);
+    updateLed(data.led_color);
+    setDotState('dot-audio', data.esp32_audio);
+    setDotState('dot-cmd',   data.esp32_cmd);
+    document.getElementById('st-esp-audio').textContent = data.esp32_audio ? 'OK' : '—';
+    document.getElementById('st-esp-cmd').textContent   = data.esp32_cmd   ? 'OK' : '—';
+    log('init', 'Stato iniziale ricevuto.');
+    return;
+  }
+
+  // Aggiornamenti
+  if (type === 'state_change') {
+    updateState(data.state);
+  }
+  if (type === 'command_sent' && data.cmd === 'set_led') {
+    updateLed(data.params);
+  }
+  if (type === 'command_sent' && data.cmd === 'set_led_off') {
+    updateLed({ r: 0, g: 0, b: 0 });
+  }
+  if (type === 'stt_result') {
+    document.getElementById('last-transcript').textContent = data.text || '—';
+  }
+  if (type === 'llm_result') {
+    try {
+      document.getElementById('last-llm').textContent = JSON.stringify(data.result, null, 2);
+    } catch(e) {}
+  }
+  if (type === 'esp32_audio_connected')      { setDotState('dot-audio', true);  document.getElementById('st-esp-audio').textContent = 'OK'; }
+  if (type === 'esp32_audio_disconnected')   { setDotState('dot-audio', false); document.getElementById('st-esp-audio').textContent = '—'; }
+  if (type === 'esp32_cmd_connected')        { setDotState('dot-cmd',   true);  document.getElementById('st-esp-cmd').textContent   = 'OK'; }
+  if (type === 'esp32_cmd_disconnected')     { setDotState('dot-cmd',   false); document.getElementById('st-esp-cmd').textContent   = '—'; }
+  
+  
+  
+  if (type === 'audio_chunk') {
+    vuActive = true;
+    animateVU();
+  }
+  
+  
+  // Bumper hit
+  if (type === 'bumper_hit') {
+    handleBumperHit(data.side);
+  }
+
+  // Motor timeout
+  if (type === 'motor_timeout') {
+    log('motor_timeout', 'Motori fermati (timeout)');
+  }
+
+  // ACK motori
+  if (type === 'esp32_ack') {
+    const ack = data.ack;
+    if (['move_forward','move_backward','turn_left','turn_right','stop'].includes(ack)) {
+      log('motor_ack', ack + (data.speed ? ' spd=' + data.speed : ''));
+    }
+  }
+
+
+  // Log tutto tranne noise
+  const noisy = new Set(['audio_chunk']);
+  if (!noisy.has(type)) {
+    const body = type === 'stt_result' ? data.text :
+                 type === 'command_sent' ? `${data.cmd} ${JSON.stringify(data.params)}` :
+                 type === 'state_change' ? data.state :
+                 type === 'llm_result'   ? JSON.stringify(data.result).slice(0,80) :
+                 type === 'bumper_hit'    ? 'Collisione lato: ' + data.side :
+                 type === 'motor_timeout' ? 'Timeout motore' :
+				 
+				 '';
+    log(type, body);
+  }
+}
+
+// ─── UI UPDATE ────────────────────────────────────────
+function updateState(state) {
+  document.getElementById('st-state').textContent = state.toUpperCase();
+
+  const badge = document.getElementById('state-badge');
+  badge.textContent = state.toUpperCase();
+  badge.className = `state-badge state-${state}`;
+
+  // Occhi robot
+  const eyeColor = state === 'listening' ? '#00e5ff' :
+                   state === 'processing' ? '#ffcc00' :
+                   state === 'speaking'   ? '#ff9f43' : '#1a3a4a';
+  document.getElementById('eye-l').setAttribute('fill', eyeColor);
+  document.getElementById('eye-r').setAttribute('fill', eyeColor);
+  document.getElementById('antenna-dot').setAttribute('fill', eyeColor);
+}
+
+function updateLed(color) {
+  if (!color) return;
+  currentLed = { r: color.r || 0, g: color.g || 0, b: color.b || 0 };
+  const css = `rgb(${currentLed.r},${currentLed.g},${currentLed.b})`;
+  const glow = currentLed.r + currentLed.g + currentLed.b > 20
+    ? `0 0 14px rgb(${currentLed.r},${currentLed.g},${currentLed.b})`
+    : 'none';
+
+  for (let i = 0; i < 4; i++) {
+    const dot = document.getElementById(`led${i}`);
+    dot.style.background = css;
+    dot.style.boxShadow  = glow;
+    dot.style.borderColor = currentLed.r + currentLed.g + currentLed.b > 20 ? 'transparent' : 'var(--border)';
+  }
+
+  const preview = document.getElementById('st-led-preview');
+  preview.style.background = css;
+  document.getElementById('st-led-val').textContent =
+    `rgb(${currentLed.r},${currentLed.g},${currentLed.b})`;
+}
+
+function setDotState(id, on) {
+  const dot = document.getElementById(id);
+  dot.className = 'ind-dot' + (on === true ? ' on' : on === 'err' ? ' err' : '');
+}
+
+
+// ─── BUMPER ───────────────────────────────────────────
+function handleBumperHit(side) {
+  const dotId = side === 'left' ? 'bump-dot-l' : 'bump-dot-r';
+  const dot = document.getElementById(dotId);
+  dot.classList.add('hit');
+  log('bumper_hit', 'Collisione: ' + side.toUpperCase());
+
+  // Flash per 2 secondi
+  setTimeout(() => {
+    dot.classList.remove('hit');
+  }, 2000);
+}
+
+
+
+// ─── VU METER ─────────────────────────────────────────
+function animateVU() {
+  const bars = document.querySelectorAll('.vu-bar');
+  if (!vuActive) {
+    bars.forEach(b => b.style.height = '4px');
+    return;
+  }
+  bars.forEach(b => {
+    const h = 4 + Math.random() * 34;
+    b.style.height = h + 'px';
+    const pct = h / 38;
+    b.style.background = pct > .7 ? '#ff3d71' : pct > .4 ? '#ffcc00' : '#00e5ff';
+  });
+  setTimeout(() => {
+    vuActive = false;
+    requestAnimationFrame(animateVU);
+  }, 150);
+}
+
+// ─── COMANDI MOTORE ───────────────────────────────────
+function motorCmd(cmd) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log('error', 'Non connesso!');
+    return;
+  }
+
+  const speed    = +document.getElementById('sl-speed').value;
+  const duration = +document.getElementById('sl-duration').value;
+
+  let cmd_obj;
+  if (cmd === 'stop') {
+    cmd_obj = { cmd: 'stop', params: {} };
+  } else {
+    cmd_obj = {
+      cmd: cmd,
+      params: {
+        speed: speed,
+        duration_ms: duration  // 0 = finché non rilasci il pulsante
+      }
+    };
+  }
+
+  sendManualCmd(cmd_obj);
+}
+
+function updateMotorSliders() {
+  const speed    = +document.getElementById('sl-speed').value;
+  const duration = +document.getElementById('sl-duration').value;
+  document.getElementById('sv-speed').textContent    = speed;
+  document.getElementById('sv-duration').textContent = duration;
+  document.getElementById('motor-speed-val').textContent = speed;
+
+  // Aggiorna hint
+  const hint = document.querySelector('.motor-hint');
+  if (duration === 0) {
+    hint.textContent = 'DUR=0: muovi finché tieni premuto';
+    hint.style.color = 'var(--accent)';
+  } else {
+    hint.textContent = 'DUR=' + duration + 'ms: movimento temporizzato';
+    hint.style.color = 'var(--text-dim)';
+  }
+}
+
+// ─── PRESET MOVIMENTI ─────────────────────────────────
+async function motorPreset(name) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log('error', 'Non connesso!');
+    return;
+  }
+
+  const speed = +document.getElementById('sl-speed').value;
+  log('motor_preset', 'Esecuzione: ' + name);
+
+  if (name === 'square') {
+    // Quadrato: avanti-gira × 4
+    for (let i = 0; i < 4; i++) {
+      sendManualCmd({ cmd: 'move_forward', params: { speed: speed, duration_ms: 1500 } });
+      await sleep(1700);
+      sendManualCmd({ cmd: 'turn_right', params: { speed: speed, duration_ms: 600 } });
+      await sleep(800);
+    }
+    sendManualCmd({ cmd: 'stop', params: {} });
+  }
+
+  else if (name === 'spin') {
+    // Giro su se stesso
+    sendManualCmd({ cmd: 'turn_left', params: { speed: 200, duration_ms: 3000 } });
+  }
+
+  else if (name === 'dance') {
+    // Danza: avanti-indietro + gira + LED
+	
+	const cycles = 4;           // cicli di movimento
+	const hueSpeed = 10;        // gradi di shift hue per frame
+	const frameDelay = 10;      // ms tra i frame dell'animazione LED
+	
+	for (let cycle = 0; cycle < cycles; cycle++) {
+    
+		// 🌈 Anima arcobaleno: 4 frame per ciclo per fluidità
+		for (let f = 0; f < 4; f++) {
+		  const baseHue = (cycle * 60 + f * hueSpeed) % 360;
+		  const colors = [];
+		  
+		  // Genera 4 colori con offset di 90° tra un LED e l'altro
+		  for (let led = 0; led < 4; led++) {
+			const hue = (baseHue + led * 90) % 360;
+			colors.push(hsvToRgb(hue, 100, 100)); // saturazione/valore al 100%
+		  }
+		  
+		  await setLedStripColors(colors);
+		  await sleep(frameDelay);
+		}
+		
+		// 🤖 Sequenza movimento sincronizzata
+		sendManualCmd({ cmd: 'move_forward', params: { speed: 180, duration_ms: 500 } });
+		await sleep(600);
+		
+		sendManualCmd({ cmd: 'move_backward', params: { speed: 180, duration_ms: 500 } });
+		await sleep(600);
+		
+		sendManualCmd({ cmd: 'turn_left', params: { speed: 200, duration_ms: 400 } });
+		await sleep(500);
+  }
+	
+	
+    <!-- const colors = [ -->
+      <!-- { r: 255, g: 0, b: 0 }, -->
+      <!-- { r: 0, g: 255, b: 0 }, -->
+      <!-- { r: 0, g: 0, b: 255 }, -->
+      <!-- { r: 255, g: 255, b: 0 }, -->
+    <!-- ]; -->
+    <!-- for (let i = 0; i < 4; i++) { -->
+      <!-- sendManualCmd({ cmd: 'set_led', params: colors[i] }); -->
+      <!-- sendManualCmd({ cmd: 'move_forward', params: { speed: 180, duration_ms: 500 } }); -->
+      <!-- await sleep(600); -->
+      <!-- sendManualCmd({ cmd: 'set_led', params: colors[(i + 1) % 4] }); -->
+      <!-- sendManualCmd({ cmd: 'move_backward', params: { speed: 180, duration_ms: 500 } }); -->
+      <!-- await sleep(600); -->
+      <!-- sendManualCmd({ cmd: 'turn_left', params: { speed: 200, duration_ms: 400 } }); -->
+      <!-- await sleep(500); -->
+    <!-- } -->
+    sendManualCmd({ cmd: 'stop', params: {} });
+    sendManualCmd({ cmd: 'set_led_off', params: {} });
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+
+
+
+// ─── COMANDI ──────────────────────────────────────────
+function sendTextCmd() {
+  const text = document.getElementById('text-input').value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'text_input', text }));
+  document.getElementById('text-input').value = '';
+  log('text_input_sent', text);
+}
+
+function updateSlider() {
+  const r = +document.getElementById('sl-r').value;
+  const g = +document.getElementById('sl-g').value;
+  const b = +document.getElementById('sl-b').value;
+  document.getElementById('sv-r').textContent = r;
+  document.getElementById('sv-g').textContent = g;
+  document.getElementById('sv-b').textContent = b;
+  updateRgbPreview(r, g, b);
+}
+
+function updateRgbPreview(r, g, b) {
+  document.getElementById('rgb-preview').style.background = `rgb(${r},${g},${b})`;
+}
+
+function sendLed() {
+  const r = +document.getElementById('sl-r').value;
+  const g = +document.getElementById('sl-g').value;
+  const b = +document.getElementById('sl-b').value;
+  sendManualCmd({ cmd: 'set_led', params: { r, g, b } });
+}
+
+function sendLedOff() {
+  sendManualCmd({ cmd: 'set_led_off', params: {} });
+}
+
+function sendManualCmd(cmd_obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log('error', 'Non connesso al server!');
+    return;
+  }
+  ws.send(JSON.stringify({ type: 'manual_command', cmd_obj }));
+  log('manual_cmd', `${cmd_obj.cmd} ${JSON.stringify(cmd_obj.params)}`);
+}
+
+// ─── LOG ──────────────────────────────────────────────
+function log(type, body) {
+  const panel = document.getElementById('log-panel');
+  const now   = new Date();
+  const ts    = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+
+  const row = document.createElement('div');
+  row.className = 'log-entry';
+  row.innerHTML = `
+    <span class="log-ts">${ts}</span>
+    <span class="log-type ${type}">${type}</span>
+    <span class="log-body">${body || ''}</span>
+  `;
+  panel.appendChild(row);
+  // Mantieni max 200 righe
+  while (panel.children.length > 200) panel.removeChild(panel.firstChild);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+
+
+// ─── Helper: HSV → RGB (valori 0-255) ──────────────────────────────
+function hsvToRgb(h, s = 100, v = 100) {
+  s /= 100; v /= 100;
+  const c = v * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = v - c;
+  let [r, g, b] = [0, 0, 0];
+  
+  if (h < 60)      [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else              [r, g, b] = [c, 0, x];
+  
+  return {
+    r: Math.round((r + m) * 255),
+    g: Math.round((g + m) * 255),
+    b: Math.round((b + m) * 255)
+  };
+}
+
+// ─── Invia colori a tutti i 4 LED (con indice) ─────────────────────
+async function setLedStripColors(colors) {
+  // colors = array di 4 oggetti {r, g, b}
+  const promises = colors.map((c, i) => 
+    sendManualCmd({ cmd: 'set_led', params: { ...c, led: i } })
+  );
+  await Promise.all(promises);
+}
+
+
+</script>
+</body>
+</html>

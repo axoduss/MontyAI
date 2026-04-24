@@ -1,0 +1,9 @@
+Monty.ino
+uvicorn
+it_IT-paola-medium.onnx
+it_IT-paola-medium.onnx.json
+it_IT-riccardo-x_low.onnx
+it_IT-riccardo-x_low.onnx.json
+__pycache__/
+backup/
+TTS Voices/
