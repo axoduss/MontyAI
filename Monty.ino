@@ -12,6 +12,7 @@
  */
 
 #include "credentials.h"
+#include "display_eyes.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
@@ -92,6 +93,7 @@ WebSocketsClient wsAudio;   // WebSocket per stream audio → server
 WebSocketsClient wsCmd;     // WebSocket per comandi JSON ← server
 
 Adafruit_NeoPixel strip(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
+DisplayManager display;
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 enum RobotState { IDLE, LISTENING, PROCESSING, SPEAKING };
@@ -157,6 +159,7 @@ QueueHandle_t textOutQueue;
 TaskHandle_t taskMicHandle    = NULL;
 TaskHandle_t taskSpeakerHandle = NULL;
 TaskHandle_t taskStatusHandle  = NULL;
+TaskHandle_t taskDisplayHandle = NULL;
 
 
 // ─── CODA COMANDI ────────────────────────────────────────────────────────────
@@ -209,6 +212,8 @@ void setLedColor(uint8_t r, uint8_t g, uint8_t b);
 void setLedEffect(const char* effect);
 int16_t computeRMS(int16_t* samples, size_t count);
 void flushTtsQueue();
+void taskDisplay(void* param);
+EyeExpression parseExpression(const char* str);
 
 
 
@@ -247,6 +252,11 @@ void setup() {
   setupBumpers();     
   setupWebSockets();
 
+   // Display OLED
+  if (!display.begin()) {
+    Serial.println("[SETUP] ERRORE: Display non trovato!");
+  }
+
   // La coda contiene PUNTATORI a TtsChunk, non blocchi da 1024 byte
   ttsQueue = xQueueCreate(TTS_QUEUE_SIZE, sizeof(TtsChunk));
 
@@ -264,6 +274,7 @@ void setup() {
   xTaskCreatePinnedToCore(taskMotorWatchdog, "MotTask",  4096, NULL, 3, &taskMotorHandle,  0);
   xTaskCreatePinnedToCore(taskBumperMonitor, "BumpTask", 4096, NULL, 6, &taskBumperHandle, 0);
   xTaskCreatePinnedToCore(taskCommandProcessor, "CmdTask",  8192, NULL, 7, &taskCmdHandle,      0);
+  xTaskCreatePinnedToCore(taskDisplay, "DispTask", 8192, NULL, 2, &taskDisplayHandle, 0);
 
 
   setLedColor(0, 5, 0); // verde: pronto
@@ -521,6 +532,29 @@ void flushTtsQueue() {
 }
 
 
+// ─── PARSER ESPRESSIONE DA STRINGA ───────────────────────────────────────────
+EyeExpression parseExpression(const char* str) {
+  if (!str) return EXP_NEUTRAL;
+  
+  if (strcmp(str, "neutral") == 0)       return EXP_NEUTRAL;
+  if (strcmp(str, "happy") == 0)         return EXP_HAPPY;
+  if (strcmp(str, "sad") == 0)           return EXP_SAD;
+  if (strcmp(str, "angry") == 0)         return EXP_ANGRY;
+  if (strcmp(str, "surprised") == 0)     return EXP_SURPRISED;
+  if (strcmp(str, "sleepy") == 0)        return EXP_SLEEPY;
+  if (strcmp(str, "thinking") == 0)      return EXP_THINKING;
+  if (strcmp(str, "love") == 0)          return EXP_LOVE;
+  if (strcmp(str, "wink") == 0)          return EXP_WINK;
+  if (strcmp(str, "skeptical") == 0)     return EXP_SKEPTICAL;
+  if (strcmp(str, "excited") == 0)       return EXP_EXCITED;
+  if (strcmp(str, "confused") == 0)      return EXP_CONFUSED;
+  
+  Serial.printf("[DISP] Espressione sconosciuta: %s\n", str);
+  return EXP_NEUTRAL;
+}
+
+
+
 
 // ─── GESTIONE COMANDI JSON ────────────────────────────────────────────────────
 /*
@@ -566,7 +600,7 @@ void handleCommand(const char* json) {
     }
 
 
-    //setLedColor(r, g, b);
+   
     userLedOverride = true;
     userLedOverrideUntil = millis() + LED_OVERRIDE_DURATION_MS;
     // ACK con info LED
@@ -590,6 +624,113 @@ void handleCommand(const char* json) {
     userLedOverride = false;
     wsCmd.sendTXT("{\"ack\":\"set_led_off\"}");
   }
+
+    // ══════════════════════════════════════════════════════════════════════════
+  // DISPLAY
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // ── display_expression ────────────────────────────────────────────────────
+  // {"cmd":"display_expression","params":{"expression":"happy"}}
+  else if (strcmp(cmd, "display_expression") == 0) {
+    const char* expStr = doc["params"]["expression"].as<const char*>();
+    if (expStr) {
+      EyeExpression exp = parseExpression(expStr);
+      display.setExpression(exp);
+      display.showEyes();  // assicura modalità occhi
+      
+      char ack[80];
+      snprintf(ack, sizeof(ack),
+        "{\"ack\":\"display_expression\",\"expression\":\"%s\"}", expStr);
+      wsCmd.sendTXT(ack);
+    }
+  }
+
+  // ── display_look ──────────────────────────────────────────────────────────
+  // {"cmd":"display_look","params":{"direction":"left"}}
+  else if (strcmp(cmd, "display_look") == 0) {
+    const char* dirStr = doc["params"]["direction"].as<const char*>();
+    if (dirStr) {
+      LookDirection dir = LOOK_CENTER;
+      if (strcmp(dirStr, "left") == 0)       dir = LOOK_LEFT;
+      else if (strcmp(dirStr, "right") == 0) dir = LOOK_RIGHT;
+      else if (strcmp(dirStr, "up") == 0)    dir = LOOK_UP;
+      else if (strcmp(dirStr, "down") == 0)  dir = LOOK_DOWN;
+      
+      display.setLookDirection(dir);
+      wsCmd.sendTXT("{\"ack\":\"display_look\"}");
+    }
+  }
+
+  // ── display_text ──────────────────────────────────────────────────────────
+  // {"cmd":"display_text","params":{"line1":"Ciao!","line2":"Come stai?","size":2,"duration_ms":5000}}
+  else if (strcmp(cmd, "display_text") == 0) {
+    const char* l1 = doc["params"]["line1"] | "";
+    const char* l2 = doc["params"]["line2"] | "";
+    const char* l3 = doc["params"]["line3"] | "";
+    const char* l4 = doc["params"]["line4"] | "";
+    uint8_t size = doc["params"]["size"] | 1;
+    uint32_t dur = doc["params"]["duration_ms"] | 5000;
+    
+    display.showText(l1, l2, l3, l4, size, dur);
+    wsCmd.sendTXT("{\"ack\":\"display_text\"}");
+  }
+
+  // ── display_progress ──────────────────────────────────────────────────────
+  // {"cmd":"display_progress","params":{"percent":75,"label":"Caricamento...","duration_ms":0}}
+  else if (strcmp(cmd, "display_progress") == 0) {
+    uint8_t pct = doc["params"]["percent"] | 0;
+    const char* label = doc["params"]["label"] | "";
+    uint32_t dur = doc["params"]["duration_ms"] | 0;
+    
+    display.showProgress(pct, label, dur);
+    wsCmd.sendTXT("{\"ack\":\"display_progress\"}");
+  }
+
+  // ── display_icon ──────────────────────────────────────────────────────────
+  // {"cmd":"display_icon","params":{"icon_id":4,"text":"Fatto!","duration_ms":3000}}
+  else if (strcmp(cmd, "display_icon") == 0) {
+    uint8_t iconId = doc["params"]["icon_id"] | 0;
+    const char* text = doc["params"]["text"] | "";
+    uint32_t dur = doc["params"]["duration_ms"] | 3000;
+    
+    xSemaphoreTake(display.mutex, portMAX_DELAY);
+    display.state.mode = DMODE_ICON;
+    display.state.iconId = iconId;
+    strncpy(display.state.iconText, text, sizeof(display.state.iconText) - 1);
+    display.state.customModeUntilMs = (dur > 0) ? millis() + dur : 0;
+    xSemaphoreGive(display.mutex);
+    
+    wsCmd.sendTXT("{\"ack\":\"display_icon\"}");
+  }
+
+  // ── display_split ─────────────────────────────────────────────────────────
+  // {"cmd":"display_split","params":{"line1":"T: 24°C","line2":"Wifi: OK","line3":"Batt: 85%","duration_ms":10000}}
+  else if (strcmp(cmd, "display_split") == 0) {
+    const char* l1 = doc["params"]["line1"] | "";
+    const char* l2 = doc["params"]["line2"] | "";
+    const char* l3 = doc["params"]["line3"] | "";
+    uint32_t dur = doc["params"]["duration_ms"] | 10000;
+    
+    xSemaphoreTake(display.mutex, portMAX_DELAY);
+    display.state.mode = DMODE_SPLIT;
+    strncpy(display.state.textLine1, l1, sizeof(display.state.textLine1) - 1);
+    strncpy(display.state.textLine2, l2, sizeof(display.state.textLine2) - 1);
+    strncpy(display.state.textLine3, l3, sizeof(display.state.textLine3) - 1);
+    display.state.customModeUntilMs = (dur > 0) ? millis() + dur : 0;
+    xSemaphoreGive(display.mutex);
+    
+    wsCmd.sendTXT("{\"ack\":\"display_split\"}");
+  }
+
+  // ── display_eyes ──────────────────────────────────────────────────────────
+  // {"cmd":"display_eyes"} — forza ritorno a modalità occhi
+  else if (strcmp(cmd, "display_eyes") == 0) {
+    display.showEyes();
+    wsCmd.sendTXT("{\"ack\":\"display_eyes\"}");
+  }
+
+
+
 
   // ══════════════════════════════════════════════════════════════════════════
   // MOTORI
@@ -677,6 +818,18 @@ void handleCommand(const char* json) {
     ttsPlaying = true;
     setState(SPEAKING);
     userLedOverride = false;
+
+    // Imposta espressione dal server (opzionale)
+    const char* expStr = doc["params"]["expression"] | (const char*)nullptr;
+    if (expStr) {
+      display.setExpression(parseExpression(expStr));
+    } else {
+      display.setExpression(EXP_HAPPY);
+    }
+    display.showEyes();  // torna a occhi se era in modalità custom
+
+
+
   }
 
   // ── tts_end ───────────────────────────────────────────────────────────────
@@ -717,6 +870,66 @@ void taskCommandProcessor(void* param) {
   }
 }
 
+// ─── TASK: DISPLAY ───────────────────────────────────────────────────────────
+/*
+ * Aggiorna il display a ~25fps.
+ * Gestisce:
+ *   - Animazioni occhi autonome (blink, sguardo)
+ *   - Cambio espressione in base allo stato robot
+ *   - Contenuti custom da LLM
+ */
+void taskDisplay(void* param) {
+  Serial.println("[DISP Task] Avviato.");
+  
+  RobotState lastState = (RobotState)-1;
+  
+  for (;;) {
+    RobotState s = getState();
+    
+    // ── Cambio espressione automatico in base allo stato ────────────────
+    if (s != lastState && display.state.mode == DMODE_EYES) {
+      switch (s) {
+        case IDLE:
+          display.setExpression(EXP_NEUTRAL);
+          break;
+        case LISTENING:
+          display.setExpression(EXP_SURPRISED);
+          break;
+        case PROCESSING:
+          display.setExpression(EXP_THINKING);
+          break;
+        case SPEAKING:
+          display.setExpression(EXP_HAPPY);
+          break;
+      }
+      lastState = s;
+    }
+    
+    // ── Animazione parlato: alterna espressioni durante SPEAKING ────────
+    if (s == SPEAKING && display.state.mode == DMODE_EYES) {
+      // Ogni ~2s cambia leggermente espressione per sembrare "vivo"
+      static uint32_t lastSpeakChange = 0;
+      if (millis() - lastSpeakChange > 2000) {
+        int r = random(100);
+        if (r < 40) display.setExpression(EXP_HAPPY);
+        else if (r < 60) display.setExpression(EXP_NEUTRAL);
+        else if (r < 75) display.setExpression(EXP_EXCITED);
+        else display.setExpression(EXP_WINK);
+        lastSpeakChange = millis();
+      }
+    }
+    
+    // ── Disconnessione: occhi tristi ────────────────────────────────────
+    if (!wsAudioConnected || !wsCmdConnected) {
+      display.setExpression(EXP_SAD);
+    }
+    
+    // ── Update rendering (~25fps) ───────────────────────────────────────
+    display.update();
+    
+    vTaskDelay(pdMS_TO_TICKS(40));  // 25fps
+  }
+}
 
 
 // ─── TASK: MICROFONO + VAD ───────────────────────────────────────────────────

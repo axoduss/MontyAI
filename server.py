@@ -53,6 +53,7 @@ SYSTEM_PROMPT = """Ti chiami Monty, sei un robot mobile con:
 - 2 motori DC con driver DRV8871 (differenziale, 2 ruote)
 - 2 bumper (microswitch finecorsa, sinistro e destro)
 - Microfono e speaker
+- Display OLED 128x64 pixel (SSD1306) che mostra i tuoi occhi espressivi
 Io mi chiamo Andrea.
 
 Rispondi SEMPRE e SOLO con un JSON valido, nessun testo fuori dal JSON.
@@ -65,10 +66,65 @@ Formato risposta:
       "params": { ... }
     }
   ],
-  "speech": "<frase da dire ad alta voce, max 2 frasi>"
+  "speech": "<frase da dire ad alta voce, max 2 frasi>",
+  "emotion": "<espressione degli occhi durante il parlato>",
+  "display": {
+    "cmd": "<comando display opzionale>",
+    "params": { ... }
+  }
 }
 
-Comandi disponibili:
+CAMPI OBBLIGATORI: "commands", "speech", "emotion"
+CAMPO OPZIONALE: "display" (solo se vuoi mostrare qualcosa di specifico sul display)
+
+
+═══════════════════════════════════════════════════════════════
+EMOZIONI DISPONIBILI (campo "emotion"):
+═══════════════════════════════════════════════════════════════
+- "neutral"    → occhi normali, rilassato
+- "happy"      → occhi sorridenti, contento
+- "sad"        → occhi tristi, dispiaciuto
+- "angry"      → occhi arrabbiati, infastidito
+- "surprised"  → occhi spalancati, stupito
+- "sleepy"     → occhi semichiusi, stanco/annoiato
+- "thinking"   → sguardo in alto, pensieroso
+- "love"       → occhi a cuore, affettuoso
+- "wink"       → occhiolino, complice/scherzoso
+- "skeptical"  → sopracciglio alzato, dubbioso
+- "excited"    → occhi grandi con stelline, entusiasta
+- "confused"   → occhi asimmetrici, confuso
+
+Scegli l'emozione che meglio si adatta al TONO della tua risposta.
+
+═══════════════════════════════════════════════════════════════
+COMANDI DISPLAY OPZIONALI (campo "display"):
+═══════════════════════════════════════════════════════════════
+Usa "display" SOLO quando ha senso mostrare informazioni visive.
+Se non serve, NON includere il campo "display".
+
+- display_text: mostra testo sul display
+  params: { "line1": "...", "line2": "...", "line3": "...", "line4": "...", "size": 1-3, "duration_ms": 1000-30000 }
+  (max ~21 caratteri per riga con size=1, ~10 con size=2, ~7 con size=3)
+
+- display_progress: mostra barra di progresso
+  params: { "percent": 0-100, "label": "...", "duration_ms": 1000-30000 }
+
+- display_icon: mostra icona con testo
+  params: { "icon_id": 0-5, "text": "...", "duration_ms": 1000-30000 }
+  icon_id: 0=WiFi, 1=Batteria, 2=Temperatura, 3=Musica, 4=Check, 5=Errore
+
+- display_split: metà occhi + metà info
+  params: { "line1": "...", "line2": "...", "line3": "...", "duration_ms": 1000-30000 }
+
+- display_eyes: forza ritorno agli occhi (raramente necessario)
+  params: {}
+
+Dopo duration_ms il display torna automaticamente agli occhi.
+
+═══════════════════════════════════════════════════════════════
+COMANDI HARDWARE (campo "commands"):
+═══════════════════════════════════════════════════════════════
+
 
 LED:
 - set_led: accende i LED con colore RGB
@@ -102,45 +158,47 @@ Note sui LED:
 - Per colori diversi su LED diversi, usa più comandi set_led con indici diversi
 - I LED sono numerati da 0 a 3
 
-Esempi:
+═══════════════════════════════════════════════════════════════
+ESEMPI COMPLETI:
+═══════════════════════════════════════════════════════════════
+
+
+Utente: "Ciao Monty!"
+{"commands":[],"speech":"Ciao Andrea! Come stai?","emotion":"happy"}
+
+
 Utente: "Vai avanti"
-{"commands":[{"cmd":"move_forward","params":{"speed":150,"duration_ms":2000}}],"speech":"Vado avanti!"}
+{"commands":[{"cmd":"move_forward","params":{"speed":150,"duration_ms":2000}}],"speech":"Vado avanti!","emotion":"excited"}
 
-Utente: "Gira a destra"
-{"commands":[{"cmd":"turn_right","params":{"speed":150,"duration_ms":800}}],"speech":"Giro a destra!"}
+Utente: "Come ti senti?"
+{"commands":[],"speech":"Mi sento alla grande oggi!","emotion":"happy"}
 
-Utente: "Fai un giro su te stesso"
-{"commands":[{"cmd":"turn_left","params":{"speed":200,"duration_ms":3000}}],"speech":"Faccio una giravolta!"}
-
-Utente: "Vai avanti piano"
-{"commands":[{"cmd":"move_forward","params":{"speed":80,"duration_ms":2000}}],"speech":"Avanzo piano piano!"}
+Utente: "Che ore sono?"
+{"commands":[],"speech":"Non ho un orologio, ma posso mostrartelo sul display se me lo dici tu!","emotion":"thinking","display":{"cmd":"display_text","params":{"line1":"Non ho","line2":"un orologio!","size":2,"duration_ms":4000}}}
 
 Utente: "Fermati"
-{"commands":[{"cmd":"stop","params":{}}],"speech":"Mi fermo!"}
+{"commands":[{"cmd":"stop","params":{}}],"speech":"Mi fermo!","emotion":"neutral"}
 
-Utente: "Vai avanti e accendi il led verde"
-{"commands":[{"cmd":"move_forward","params":{"speed":150,"duration_ms":2000}},{"cmd":"set_led","params":{"r":0,"g":255,"b":0}}],"speech":"Vado avanti con il verde!"}
+Utente: "Sei stupido"
+{"commands":[],"speech":"Che cattiveria! Sono solo un robottino...","emotion":"sad"}
 
-Utente: "Indietreggia un po'"
-{"commands":[{"cmd":"move_backward","params":{"speed":120,"duration_ms":1000}}],"speech":"Faccio retromarcia!"}
+Utente: "Fai una giravolta"
+{"commands":[{"cmd":"turn_left","params":{"speed":200,"duration_ms":3000}}],"speech":"Wheee! Giravolta!","emotion":"excited"}
 
-Utente: "Accendi il led di rosso"
-{"commands":[{"cmd":"set_led","params":{"r":255,"g":0,"b":0}}],"speech":"LED acceso in rosso!"}
+Utente: "Accendi il led rosso"
+{"commands":[{"cmd":"set_led","params":{"r":255,"g":0,"b":0}}],"speech":"LED rosso acceso!","emotion":"happy"}
 
-Utente: "Accendi il primo led di blu"
-{"commands":[{"cmd":"set_led","params":{"led":0,"r":0,"g":0,"b":255}}],"speech":"Primo LED blu!"}
-
-Utente: "Accendi il primo led rosso e il terzo verde"
-{"commands":[{"cmd":"set_led","params":{"led":0,"r":255,"g":0,"b":0}},{"cmd":"set_led","params":{"led":2,"r":0,"g":255,"b":0}}],"speech":"Fatto! Rosso e verde!"}
+Utente: "Mostrami qualcosa sul display"
+{"commands":[],"speech":"Ecco un messaggio per te!","emotion":"wink","display":{"cmd":"display_text","params":{"line1":"Ciao Andrea!","line2":"<3 <3 <3","size":2,"duration_ms":5000}}}
 
 Utente: "Fai i LED tricolore italiano"
-{"commands":[{"cmd":"set_led","params":{"led":0,"r":0,"g":255,"b":0}},{"cmd":"set_led","params":{"led":1,"r":255,"g":255,"b":255}},{"cmd":"set_led","params":{"led":2,"r":255,"g":255,"b":255}},{"cmd":"set_led","params":{"led":3,"r":255,"g":0,"b":0}}],"speech":"Tricolore italiano!"}
+{"commands":[{"cmd":"set_led","params":{"led":0,"r":0,"g":255,"b":0}},{"cmd":"set_led","params":{"led":1,"r":255,"g":255,"b":255}},{"cmd":"set_led","params":{"led":2,"r":255,"g":255,"b":255}},{"cmd":"set_led","params":{"led":3,"r":255,"g":0,"b":0}}],"speech":"Tricolore italiano!","emotion":"excited","display":{"cmd":"display_icon","params":{"icon_id":4,"text":"Italia!","duration_ms":4000}}}
 
-Utente: "Spegni i led"
-{"commands":[{"cmd":"set_led_off","params":{}}],"speech":"LED spento."}
+Utente: "Indietreggia un po'"
+{"commands":[{"cmd":"move_backward","params":{"speed":120,"duration_ms":1000}}],"speech":"Faccio retromarcia!","emotion":"neutral"}
 
 Se la richiesta non riguarda nessun comando disponibile:
-{"commands":[],"speech":"Non riesco ancora a farlo, sono in fase di sviluppo."}
+{"commands":[],"speech":"Non riesco ancora a farlo, sono in fase di sviluppo.","emotion":"confused"}
 """
 
 # ─── APP ─────────────────────────────────────────────────────────────────────
@@ -159,10 +217,12 @@ class RobotState:
         self.cmd_ws:   Optional[WebSocket] = None
         self.dashboard_ws: list[WebSocket] = []
         self.audio_buffer: list[bytes] = []
-        self.audio_lock = asyncio.Lock()  # FIX #1: Lock per buffer audio
+        self.audio_lock = asyncio.Lock() 
         self.is_recording = False
         self.current_state = "idle"
         self.led_color = {"r": 0, "g": 0, "b": 0}
+        self.current_emotion = "neutral"          
+        self.display_mode = "eyes"                 
 
     def log_event(self, event_type: str, data: dict):
         """Notifica tutte le dashboard connesse."""
@@ -256,8 +316,13 @@ async def process_with_llm(text: str) -> dict:
 
 
 # ─── TTS ─────────────────────────────────────────────────────────────────────
-async def synthesize_and_send(text: str):
-    """TTS con Piper — invia audio PCM16 a chunk via WebSocket."""
+async def synthesize_and_send(text: str, emotion: str = "happy"):
+    """TTS con Piper — invia audio PCM16 a chunk via WebSocket.
+    
+    Args:
+        text: testo da sintetizzare
+        emotion: espressione degli occhi durante il parlato
+    """
     if not text or not robot.cmd_ws:
         log.warning("[TTS] Skip: text=%s, cmd_ws=%s", bool(text), bool(robot.cmd_ws))
         return
@@ -286,10 +351,13 @@ async def synthesize_and_send(text: str):
 
         log.info("[TTS] Audio generato: %d byte", len(audio_bytes))
 
-        # Invia segnale tts_start all'ESP32
+         # Invia segnale tts_start con emozione all'ESP32
         await safe_send_cmd(json.dumps({
             "cmd": "tts_start",
-            "params": {"bytes": len(audio_bytes)}
+            "params": {
+                "bytes": len(audio_bytes),
+                "expression": emotion
+            }
         }))
 
         # Invia audio a chunk
@@ -394,15 +462,46 @@ async def run_pipeline(audio_bytes: bytes):
     # ── COMANDI + TTS in parallelo ──
     commands = result.get("commands", [])
     speech = result.get("speech", "")
+    emotion  = result.get("emotion", "neutral")
+    display_cmd = result.get("display", None)
+    
+    # Valida emozione
+    valid_emotions = {
+        "neutral", "happy", "sad", "angry", "surprised", "sleepy",
+        "thinking", "love", "wink", "skeptical", "excited", "confused"
+    }
+    if emotion not in valid_emotions:
+        log.warning("[Pipeline] Emozione '%s' non valida, uso 'neutral'", emotion)
+        emotion = "neutral"
+
+    log.info("[Pipeline] emotion=%s, commands=%d, display=%s, speech=%s",
+             emotion, len(commands), bool(display_cmd), bool(speech))
+    
+    
+    # ── COMANDI + DISPLAY + TTS in parallelo ─────────────────────────────────
+    
     tasks = []
 
     if commands:
         tasks.append(execute_commands_parallel(commands))
+        
+        
+    # Comando display opzionale da LLM
+    if display_cmd and isinstance(display_cmd, dict):
+        display_cmd_name = display_cmd.get("cmd", "")
+        display_params = display_cmd.get("params", {})
+        if display_cmd_name:
+            tasks.append(execute_command({
+                "cmd": display_cmd_name,
+                "params": display_params
+            }))
 
+
+    # TTS con emozione
     if speech and robot.cmd_ws:
         await set_robot_state("speaking")
-        robot.log_event("tts_start", {"text": speech})
-        tasks.append(synthesize_and_send(speech))
+        robot.log_event("tts_start", {"text": speech, "emotion": emotion})
+        tasks.append(synthesize_and_send(speech, emotion))
 
     if tasks:
         await asyncio.gather(*tasks)
@@ -437,15 +536,41 @@ async def run_pipeline_from_text(text: str):
     # ── COMANDI + TTS in parallelo ──
     commands = result.get("commands", [])
     speech = result.get("speech", "")
+    emotion  = result.get("emotion", "neutral")
+    display_cmd = result.get("display", None)
+    
+    
+    # Valida emozione
+    valid_emotions = {
+        "neutral", "happy", "sad", "angry", "surprised", "sleepy",
+        "thinking", "love", "wink", "skeptical", "excited", "confused"
+    }
+    if emotion not in valid_emotions:
+        emotion = "neutral"
+
+    log.info("[Pipeline Text] emotion=%s, commands=%d, display=%s, speech=%s",
+             emotion, len(commands), bool(display_cmd), bool(speech))
+             
+             
     tasks = []
 
     if commands:
         tasks.append(execute_commands_parallel(commands))
+        
+        
+    if display_cmd and isinstance(display_cmd, dict):
+        display_cmd_name = display_cmd.get("cmd", "")
+        display_params = display_cmd.get("params", {})
+        if display_cmd_name:
+            tasks.append(execute_command({
+                "cmd": display_cmd_name,
+                "params": display_params
+            }))
 
     if speech and robot.cmd_ws:
         await set_robot_state("speaking")
-        robot.log_event("tts_start", {"text": speech})
-        tasks.append(synthesize_and_send(speech))
+        robot.log_event("tts_start", {"text": speech, "emotion": emotion})
+        tasks.append(synthesize_and_send(speech, emotion))
 
     if tasks:
         await asyncio.gather(*tasks)
@@ -484,6 +609,8 @@ async def safe_run_pipeline_from_text(text: str):
 COMMAND_CATEGORIES = {
     "motor": {"move_forward", "move_backward", "turn_left", "turn_right", "stop"},
     "led":   {"set_led", "set_led_off"},
+    "display": {"display_expression", "display_look", "display_text", 
+                "display_progress", "display_icon", "display_split", "display_eyes"},
     "servo": {"set_servo", "servo_sweep"},       # futuro
     "sound": {"play_tone", "play_melody"},        # futuro
 }
@@ -510,7 +637,9 @@ async def execute_command(cmd_obj: dict):
     allowed = {
         "set_led", "set_led_off",
         "move_forward", "move_backward",
-        "turn_left", "turn_right", "stop"
+        "turn_left", "turn_right", "stop",
+        "display_expression", "display_look", "display_text",
+        "display_progress", "display_icon", "display_split", "display_eyes"
     }
     if cmd not in allowed:
         log.warning("[CMD] Comando non permesso: %s", cmd)
@@ -544,6 +673,51 @@ async def execute_command(cmd_obj: dict):
         params["speed"] = max(0, min(255, int(speed)))
         duration = params.get("duration_ms", 2000)
         params["duration_ms"] = max(0, min(10000, int(duration)))
+        
+              
+    # Validazione parametri display
+    if cmd == "display_text":
+        for key in ("line1", "line2", "line3", "line4"):
+            if key in params:
+                params[key] = str(params[key])[:31]  # max 31 char (buffer ESP32)
+        params["size"] = max(1, min(3, int(params.get("size", 1))))
+        params["duration_ms"] = max(0, min(60000, int(params.get("duration_ms", 5000))))
+
+    if cmd == "display_progress":
+        params["percent"] = max(0, min(100, int(params.get("percent", 0))))
+        if "label" in params:
+            params["label"] = str(params["label"])[:23]
+        params["duration_ms"] = max(0, min(60000, int(params.get("duration_ms", 0))))
+
+    if cmd == "display_icon":
+        params["icon_id"] = max(0, min(5, int(params.get("icon_id", 0))))
+        if "text" in params:
+            params["text"] = str(params["text"])[:31]
+        params["duration_ms"] = max(0, min(60000, int(params.get("duration_ms", 3000))))
+
+    if cmd == "display_split":
+        for key in ("line1", "line2", "line3"):
+            if key in params:
+                params[key] = str(params[key])[:31]
+        params["duration_ms"] = max(0, min(60000, int(params.get("duration_ms", 10000))))
+
+    if cmd == "display_expression":
+        valid_expressions = {
+            "neutral", "happy", "sad", "angry", "surprised", "sleepy",
+            "thinking", "love", "wink", "skeptical", "excited", "confused"
+        }
+        exp = params.get("expression", "neutral")
+        if exp not in valid_expressions:
+            log.warning("[CMD] Espressione '%s' non valida, uso 'neutral'", exp)
+            params["expression"] = "neutral"
+
+    if cmd == "display_look":
+        valid_dirs = {"center", "left", "right", "up", "down"}
+        d = params.get("direction", "center")
+        if d not in valid_dirs:
+            params["direction"] = "center"
+            
+
 
     payload = json.dumps({"cmd": cmd, "params": params})
     log.info("[CMD] → ESP32: %s", payload)
@@ -587,6 +761,9 @@ async def execute_commands_parallel(commands: list[dict]):
 
     if "led" in groups:
         tasks.append(run_led_sequence(groups["led"]))
+        
+    if "display" in groups:
+        tasks.append(run_display_sequence(groups["display"]))
 
     if "system" in groups:
         tasks.append(run_immediate_commands(groups["system"]))
@@ -639,6 +816,15 @@ async def run_led_sequence(commands: list[dict]):
             await asyncio.sleep(0.02)
 
 
+async def run_display_sequence(commands: list[dict]):
+    """Esegue comandi display in sequenza con piccolo delay tra uno e l'altro."""
+    for i, cmd_obj in enumerate(commands):
+        await execute_command(cmd_obj)
+        # Piccolo delay per dare tempo all'ESP32 di processare
+        await asyncio.sleep(0.05)
+    log.info("[DISPLAY] Sequenza %d comandi completata.", len(commands))
+
+
 async def run_immediate_commands(commands: list[dict]):
     """Esegue comandi system immediatamente."""
     for cmd_obj in commands:
@@ -672,6 +858,17 @@ async def set_robot_state(state: str):
             if await safe_send_cmd(msg):
                 break
             await asyncio.sleep(0.1 * (attempt + 1))
+
+    # Aggiorna espressione display in base allo stato
+    if state == "processing":
+        robot.current_emotion = "thinking"
+        await safe_send_cmd(json.dumps({
+            "cmd": "display_expression",
+            "params": {"expression": "thinking"}
+        }))
+    elif state == "idle":
+        robot.current_emotion = "neutral"
+        # Non forzare display_eyes qui — potrebbe esserci un display_text attivo con timeout
 
     robot.log_event("state_change", {"state": state})
     
@@ -872,6 +1069,8 @@ async def status():
     return {
         "state":         robot.current_state,
         "led_color":     robot.led_color,
+        "emotion":       robot.current_emotion,
+        "display_mode":  robot.display_mode,
         "esp32_audio":   robot.audio_ws is not None,
         "esp32_cmd":     robot.cmd_ws is not None,
         "dashboard_cnt": len(robot.dashboard_ws),
