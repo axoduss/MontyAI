@@ -1092,6 +1092,11 @@ async function motorPreset(name) {
 	const hueSpeed = 10;        // gradi di shift hue per frame
 	const frameDelay = 10;      // ms tra i frame dell'animazione LED
 	
+	sendManualCmd({ cmd: 'display_expression', params: { expression: "excited" }, speech: "Guarda come ballo!"});
+	
+	
+
+	
 	for (let cycle = 0; cycle < cycles; cycle++) {
     
 		// 🌈 Anima arcobaleno: 4 frame per ciclo per fluidità
@@ -1110,14 +1115,15 @@ async function motorPreset(name) {
 		}
 		
 		// 🤖 Sequenza movimento sincronizzata
+		
 		sendManualCmd({ cmd: 'move_forward', params: { speed: 180, duration_ms: 500 } });
 		await sleep(600);
 		
 		sendManualCmd({ cmd: 'move_backward', params: { speed: 180, duration_ms: 500 } });
 		await sleep(600);
 		
-		sendManualCmd({ cmd: 'turn_left', params: { speed: 200, duration_ms: 400 } });
-		await sleep(500);
+		sendManualCmd({ cmd: 'turn_left', params: { speed: 200, duration_ms: 500 } });
+		await sleep(600);
   }
 	
 	
@@ -1139,6 +1145,7 @@ async function motorPreset(name) {
     <!-- } -->
     sendManualCmd({ cmd: 'stop', params: {} });
     sendManualCmd({ cmd: 'set_led_off', params: {} });
+	sendManualCmd({ cmd: 'display_expression', params: { expression: "neutral" }});
   }
 }
 

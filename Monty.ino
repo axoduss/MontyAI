@@ -78,14 +78,14 @@ const char* WS_CMD_PATH    = "/cmd";
 #define AUDIO_CHUNK_SIZE  (I2S_DMA_BUF_LEN * 2) // byte
 
 // ─── VAD (Voice Activity Detection) semplice ─────────────────────────────────
-#define VAD_THRESHOLD     800     // Ampiezza minima RMS
+#define VAD_THRESHOLD     1000     // Ampiezza minima RMS
 #define VAD_SILENCE_MS    1200    // ms silenzio per chiudere utterance
 #define VAD_MIN_SPEECH_MS 300     // ms minimi di parlato valido
 
 
 // ─── POST-TTS COOLDOWN ──────────────────────────────────────────────────────
-volatile uint32_t micEnableAfterMs = 0;  // millis() dopo cui il mic può ascoltare
-#define POST_TTS_COOLDOWN_MS  800        // ms di silenzio forzato dopo TTS (regolabile)
+volatile uint32_t micEnableAfterMs = 10;  // millis() dopo cui il mic può ascoltare
+#define POST_TTS_COOLDOWN_MS  2000        // ms di silenzio forzato dopo TTS (regolabile)
 
 
 // ─── OGGETTI GLOBALI ─────────────────────────────────────────────────────────
@@ -952,21 +952,39 @@ void taskMic(void* param) {
         inSpeech = false;
         Serial.println("[VAD] Reset — stato cambiato durante ascolto.");
       }
+      // Drena continuamente il buffer DMA per evitare accumulo
+      // Questo è CRITICO: se non leggiamo, il buffer si riempie di audio TTS
+      size_t bytesRead = 0;
+      i2s_read(I2S_MIC_PORT, rawBuf, sizeof(rawBuf), &bytesRead, pdMS_TO_TICKS(20));
+      // Scarta tutto — non processare
+
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
+
+    // Flush hardware del buffer I2S
+    i2s_zero_dma_buffer(I2S_MIC_PORT);
 
     // *** COOLDOWN POST-TTS: non ascoltare finché non è passato il tempo ***
     if (millis() < micEnableAfterMs) {
       // Leggi e scarta i campioni per svuotare il buffer DMA del microfono
       size_t bytesRead = 0;
-      i2s_read(I2S_MIC_PORT, rawBuf, sizeof(rawBuf), &bytesRead, portMAX_DELAY);
+      //i2s_read(I2S_MIC_PORT, rawBuf, sizeof(rawBuf), &bytesRead, portMAX_DELAY);
+      esp_err_t err = i2s_read(I2S_MIC_PORT, rawBuf, sizeof(rawBuf), &bytesRead, pdMS_TO_TICKS(10));
       // Non processare — stiamo solo drenando il buffer
-      vTaskDelay(pdMS_TO_TICKS(10));
+      //vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
+   
 
+    // Flush hardware del buffer I2S
+    i2s_zero_dma_buffer(I2S_MIC_PORT);
 
+    Serial.println("[MIC] Drain completato, ascolto attivo.");
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ASCOLTO NORMALE con VAD
+    // ═══════════════════════════════════════════════════════════════════════
 
     size_t bytesRead = 0;
     i2s_read(I2S_MIC_PORT, rawBuf, sizeof(rawBuf), &bytesRead, portMAX_DELAY);
@@ -986,13 +1004,13 @@ void taskMic(void* param) {
       if (!inSpeech) {
         inSpeech      = true;
         speechStartMs = millis();
-        setState(LISTENING);  // FIX #6: setter thread-safe
-        // FIX #3: Disattiva LED override quando si inizia ad ascoltare
+        setState(LISTENING); 
+        // Disattiva LED override quando si inizia ad ascoltare
         userLedOverride = false;
         Serial.println("[VAD] Inizio parlato");
       }
 
-      // FIX #2: Accoda il chunk audio invece di chiamare wsAudio.sendBIN()
+      // Accoda il chunk audio invece di chiamare wsAudio.sendBIN()
       size_t audioLen = samplesRead * sizeof(int16_t);
       if (audioLen <= sizeof(((AudioOutChunk*)0)->data)) {
         AudioOutChunk aoc;
@@ -1008,7 +1026,6 @@ void taskMic(void* param) {
 
       // Continua a inviare anche nel silenzio per non troncare parole finali
       if ((millis() - speechStartMs) < 15000) {
-        // FIX #2: Accoda anche i chunk di silenzio
         size_t audioLen = samplesRead * sizeof(int16_t);
         if (audioLen <= sizeof(((AudioOutChunk*)0)->data)) {
           AudioOutChunk aoc;
@@ -1029,7 +1046,7 @@ void taskMic(void* param) {
             "{\"type\":\"end_of_speech\"}");
           xQueueSend(textOutQueue, &tom, pdMS_TO_TICKS(100));
 
-          setState(PROCESSING);  // FIX #6
+          setState(PROCESSING); 
         } else {
           Serial.println("[VAD] Troppo breve, ignorato.");
           setState(IDLE); 
@@ -1068,7 +1085,7 @@ void taskSpeaker(void* param) {
 
     } else {
       // Coda vuota — controlliamo se il TTS è finito
-      RobotState currentState = getState();  // FIX #6
+      RobotState currentState = getState(); 
 
       if (currentState == SPEAKING) {
         // Fine TTS solo se:
@@ -1084,8 +1101,9 @@ void taskSpeaker(void* param) {
             Serial.println("[SPK] TTS completato.");
           }
 
-          // Svuota buffer I2S per evitare audio residuo
-          i2s_zero_dma_buffer(I2S_SPK_PORT);
+          vTaskDelay(pdMS_TO_TICKS(100)); // Attendi che l'ultimo buffer DMA dello speaker finisca
+          i2s_zero_dma_buffer(I2S_SPK_PORT);// Svuota buffer I2S per evitare audio residuo
+          vTaskDelay(pdMS_TO_TICKS(100)); // Altra pausa
 
           // Reset flags
           ttsPlaying = false;
@@ -1094,6 +1112,7 @@ void taskSpeaker(void* param) {
 
           // *** COOLDOWN: blocca il microfono per evitare che senta l'eco ***
           micEnableAfterMs = millis() + POST_TTS_COOLDOWN_MS;
+          vTaskDelay(pdMS_TO_TICKS(POST_TTS_COOLDOWN_MS)); // Altra pausa
           Serial.printf("[SPK] TTS completato. Mic cooldown %dms.\n", POST_TTS_COOLDOWN_MS);
                     
           setState(IDLE);
@@ -1114,7 +1133,7 @@ void taskStatusLed(void* param) {
   Serial.println("[LED Task] Avviato.");
 
   for (;;) {
-    RobotState s = getState();  // FIX #6: accesso thread-safe
+    RobotState s = getState();  //accesso thread-safe
     tick++;
 
     // Se l'utente ha impostato un colore LED, non sovrascrivere

@@ -1029,7 +1029,7 @@ async def ws_dashboard(ws: WebSocket):
         while True:
             msg = await ws.receive()
 
-            # FIX #4: Controlla disconnessione
+            #Controlla disconnessione
             if msg.get("type") == "websocket.disconnect":
                 break
 
