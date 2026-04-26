@@ -233,9 +233,13 @@ class RobotState:
                 **data
             }
             # Verifica che ci sia un event loop attivo
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(self._broadcast_dashboard(json.dumps(msg)))
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running():
+                    asyncio.create_task(self._broadcast_dashboard(json.dumps(msg)))
+            except RuntimeError:
+                # Nessun event loop in esecuzione
+                pass
         except Exception as e:
             log.warning("[Event] Broadcast fallito: %s", e)
 
@@ -379,8 +383,6 @@ async def synthesize_and_send(text: str, emotion: str = "happy"):
                 if chunks_sent % BATCH_SIZE == 0:
                     await asyncio.sleep(BATCH_DELAY)
                 
-                
-                
             except Exception as e:
                 log.warning("[TTS] Invio chunk %d fallito: %s", chunks_sent, e)
                 break
@@ -410,10 +412,10 @@ async def safe_send_cmd(payload: str):
     if robot.cmd_ws:
         try:
             await robot.cmd_ws.send_text(payload)
+            return True
         except Exception as e:
             log.warning("[CMD] Invio fallito: %s", e)
-           # robot.cmd_ws = None
-        return False 
+            # robot.cmd_ws = None
     return False
             
             
@@ -445,8 +447,6 @@ async def run_pipeline(audio_bytes: bytes):
     robot.log_event("llm_result", {"result": result})
 
     # ── ESEGUI COMANDI ────────────────────────────────────────────────────────
-    # for cmd_obj in result.get("commands", []):
-        # await execute_command(cmd_obj)  
     
     # ── COMANDI + TTS in parallelo ──
     commands = result.get("commands", [])
@@ -518,6 +518,7 @@ async def run_pipeline_from_text(text: str):
         "thinking", "love", "wink", "skeptical", "excited", "confused"
     }
     if emotion not in valid_emotions:
+        log.warning("[Pipeline Text] Emozione '%s' non valida, uso 'neutral'", emotion)
         emotion = "neutral"
 
     log.info("[Pipeline Text] emotion=%s, commands=%d, display=%s, speech=%s",
