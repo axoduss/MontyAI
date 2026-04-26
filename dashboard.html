@@ -359,6 +359,8 @@
   .log-type.audio_chunk   { color: #2a3a4a; }
   .log-type.esp32_audio_connected, .log-type.esp32_cmd_connected { color: var(--accent3); }
   .log-type.esp32_audio_disconnected, .log-type.esp32_cmd_disconnected { color: var(--accent2); }
+  .log-type.display_cmd   { color: #a78bfa; }
+  .log-type.display_text  { color: #c084fc; }
   
   
     /* ─── MOTORI: D-PAD ──────────────────────────── */
@@ -745,6 +747,38 @@
       </div>
     </div>
 
+    <!-- DISPLAY OLED -->
+    <div class="cmd-section">
+      <div class="cmd-section-label">Display OLED</div>
+      
+      <!-- Espressioni predefinite -->
+      <div class="btn-row" style="margin-bottom:8px;flex-wrap:wrap;">
+        <button class="btn" onclick="sendDisplayCmd('neutral')">😊 Neutro</button>
+        <button class="btn" onclick="sendDisplayCmd('happy')">😄 Felice</button>
+        <button class="btn" onclick="sendDisplayCmd('excited')">🤩 Eccitato</button>
+        <button class="btn" onclick="sendDisplayCmd('sleeping')">😴 Dormendo</button>
+        <button class="btn" onclick="sendDisplayCmd('listening')">👂 Ascolto</button>
+        <button class="btn" onclick="sendDisplayCmd('processing')">🤔 Pensando</button>
+        <button class="btn" onclick="sendDisplayCmd('speaking')">🗣️ Parlando</button>
+        <button class="btn" onclick="sendDisplayCmd('error')">⚠️ Errore</button>
+      </div>
+      
+      <!-- Testo personalizzato -->
+      <div style="margin-top:8px;">
+        <div class="text-cmd-row">
+          <input type="text" class="text-cmd-input" id="display-text-input" placeholder="Testo da mostrare...">
+          <button class="btn btn-primary" onclick="sendDisplayText()">INVIA</button>
+        </div>
+      </div>
+      
+      <!-- Comandi extra -->
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn btn-danger" onclick="sendDisplayClear()">CLEAR</button>
+        <button class="btn" onclick="sendDisplayBrightness(255)">MAX BRIGHT</button>
+        <button class="btn" onclick="sendDisplayBrightness(50)">DIM</button>
+      </div>
+    </div>
+
     <!-- Connessione -->
     <div class="cmd-section">
       <div class="cmd-section-label">Server WS</div>
@@ -802,6 +836,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('text-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') sendTextCmd();
+  });
+
+  document.getElementById('display-text-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendDisplayText();
   });
 });
 
@@ -1189,6 +1227,30 @@ function sendLed() {
 
 function sendLedOff() {
   sendManualCmd({ cmd: 'set_led_off', params: {} });
+}
+
+// ─── COMANDI DISPLAY OLED ─────────────────────────────
+function sendDisplayCmd(expression) {
+  sendManualCmd({ cmd: 'display_expression', params: { expression } });
+  log('display_cmd', `Expression: ${expression}`);
+}
+
+function sendDisplayText() {
+  const text = document.getElementById('display-text-input').value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  sendManualCmd({ cmd: 'display_text', params: { text } });
+  document.getElementById('display-text-input').value = '';
+  log('display_text', text);
+}
+
+function sendDisplayClear() {
+  sendManualCmd({ cmd: 'display_clear', params: {} });
+  log('display_cmd', 'Clear display');
+}
+
+function sendDisplayBrightness(brightness) {
+  sendManualCmd({ cmd: 'display_brightness', params: { brightness } });
+  log('display_cmd', `Brightness: ${brightness}`);
 }
 
 function sendManualCmd(cmd_obj) {
