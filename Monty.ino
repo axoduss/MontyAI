@@ -923,21 +923,6 @@ void taskDisplay(void* param) {
         }
         lastState = s;
     }
-    
-    // ── Animazione parlato: alterna espressioni durante SPEAKING ────────
-    if (s == SPEAKING && display.state.mode == DMODE_EYES) {
-      // Ogni ~2s cambia leggermente espressione per sembrare "vivo"
-      static uint32_t lastSpeakChange = 0;
-      if (millis() - lastSpeakChange > 2000) {
-        int r = random(100);
-        if (r < 40) display.setExpression(EXP_HAPPY);
-        else if (r < 60) display.setExpression(EXP_NEUTRAL);
-        else if (r < 75) display.setExpression(EXP_EXCITED);
-        else display.setExpression(EXP_WINK);
-        lastSpeakChange = millis();
-      }
-    }
-
 
     // ── Animazione parlato: usa l'espressione LLM come BASE ─────────
     if (s == SPEAKING && display.state.mode == DMODE_EYES) {
