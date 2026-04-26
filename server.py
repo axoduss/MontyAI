@@ -446,18 +446,7 @@ async def run_pipeline(audio_bytes: bytes):
 
     # ── ESEGUI COMANDI ────────────────────────────────────────────────────────
     # for cmd_obj in result.get("commands", []):
-        # await execute_command(cmd_obj)
-
-    # ── TTS ───────────────────────────────────────────────────────────────────
-    # speech = result.get("speech", "")
-    # if speech and robot.cmd_ws:
-        # await set_robot_state("speaking")
-        # robot.log_event("tts_start", {"text": speech})
-        # await synthesize_and_send(speech)
-        # robot.log_event("tts_end", {})
-
-    # await set_robot_state("idle")
-    
+        # await execute_command(cmd_obj)  
     
     # ── COMANDI + TTS in parallelo ──
     commands = result.get("commands", [])
@@ -479,12 +468,10 @@ async def run_pipeline(audio_bytes: bytes):
     
     
     # ── COMANDI + DISPLAY + TTS in parallelo ─────────────────────────────────
-    
     tasks = []
 
     if commands:
         tasks.append(execute_commands_parallel(commands))
-        
         
     # Comando display opzionale da LLM
     if display_cmd and isinstance(display_cmd, dict):
@@ -495,7 +482,6 @@ async def run_pipeline(audio_bytes: bytes):
                 "cmd": display_cmd_name,
                 "params": display_params
             }))
-
 
     # TTS con emozione
     if speech and robot.cmd_ws:
@@ -520,25 +506,11 @@ async def run_pipeline_from_text(text: str):
     result = await process_with_llm(text)
     robot.log_event("llm_result", {"result": result})
 
-    # for cmd_obj in result.get("commands", []):
-        # await execute_command(cmd_obj)
-
-    # speech = result.get("speech", "")
-    # if speech and robot.cmd_ws:
-        # await set_robot_state("speaking")
-        # robot.log_event("tts_start", {"text": speech})
-        # await synthesize_and_send(speech)
-        # robot.log_event("tts_end", {})
-
-    # await set_robot_state("idle")
-
-
     # ── COMANDI + TTS in parallelo ──
     commands = result.get("commands", [])
     speech = result.get("speech", "")
     emotion  = result.get("emotion", "neutral")
     display_cmd = result.get("display", None)
-    
     
     # Valida emozione
     valid_emotions = {
@@ -601,7 +573,6 @@ async def safe_run_pipeline_from_text(text: str):
     except Exception as e:
         log.error("[Pipeline Text] ERRORE: %s", repr(e), exc_info=True)
         await set_robot_state("idle")
-
 
 
 # ─── CLASSIFICAZIONE COMANDI ─────────────────────────────────────────────────
@@ -1041,14 +1012,13 @@ async def ws_dashboard(ws: WebSocket):
 
                 # Dashboard può inviare comandi manuali
                 if data.get("type") == "manual_command":
-                    cmd_obj = data.get("cmd_obj", {})
+                    cmd_obj = data.get("cmd_obj", {})                 
                     await execute_command(cmd_obj)
 
                 # Dashboard può inviare testo direttamente (bypass STT)
                 elif data.get("type") == "text_input":
                     text = data.get("text", "")
                     if text:
-                        # FIX #2: Usa safe wrapper
                         asyncio.create_task(safe_run_pipeline_from_text(text))
 
     except WebSocketDisconnect:

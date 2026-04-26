@@ -606,8 +606,8 @@ private:
   // DECORAZIONI ESPRESSIONI
   // ══════════════════════════════════════════════════════════════════════════
   
-  void drawHappyMouth() {
-    // Sorriso: arco in basso al centro
+  void drawSadMouth() {
+    // Bocca triste: arco invertito
     int16_t mouthCX = 64;
     int16_t mouthCY = 54;
     // Arco con segmenti
@@ -619,8 +619,8 @@ private:
     }
   }
   
-  void drawSadMouth() {
-    // Bocca triste: arco invertito
+  void drawHappyMouth() {    
+    // Sorriso: arco in basso al centro
     int16_t mouthCX = 64;
     int16_t mouthCY = 58;
     for (int16_t x = -10; x <= 10; x++) {

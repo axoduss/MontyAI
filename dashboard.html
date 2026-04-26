@@ -1092,7 +1092,8 @@ async function motorPreset(name) {
 	const hueSpeed = 10;        // gradi di shift hue per frame
 	const frameDelay = 10;      // ms tra i frame dell'animazione LED
 	
-	sendManualCmd({ cmd: 'display_expression', params: { expression: "excited" }, speech: "Guarda come ballo!"});
+	sendManualCmd({ cmd: 'display_expression', params: { expression: "excited" }, });
+	sendManualCmd({ speech: "Guarda come ballo bene!"});
 	
 	
 

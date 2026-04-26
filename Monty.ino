@@ -124,6 +124,11 @@ volatile bool userLedOverride = false;
 volatile uint32_t userLedOverrideUntil = 0;
 #define LED_OVERRIDE_DURATION_MS 60000  // mantieni colore utente per 60s
 
+
+// Espressione impostata dal server (LLM) — ha priorità sull'automatica
+volatile bool serverExpressionActive = false;
+EyeExpression serverExpression = EXP_NEUTRAL;
+
 // ─── TTS con struct che include lunghezza ──────────────────────
 typedef struct {
   uint8_t* data;
@@ -819,14 +824,29 @@ void handleCommand(const char* json) {
     setState(SPEAKING);
     userLedOverride = false;
 
-    // Imposta espressione dal server (opzionale)
+     // Imposta espressione dal server
     const char* expStr = doc["params"]["expression"] | (const char*)nullptr;
     if (expStr) {
-      display.setExpression(parseExpression(expStr));
+        serverExpression = parseExpression(expStr);
+        serverExpressionActive = true;
+        display.setExpression(serverExpression);
     } else {
-      display.setExpression(EXP_HAPPY);
+        serverExpression = EXP_HAPPY;
+        serverExpressionActive = true;
+        display.setExpression(EXP_HAPPY);
     }
-    display.showEyes();  // torna a occhi se era in modalità custom
+
+    // NON chiamare showEyes() se c'è un display custom attivo con timeout
+    xSemaphoreTake(display.mutex, portMAX_DELAY);
+    bool hasCustomContent = (display.state.mode != DMODE_EYES) && 
+                            (display.state.customModeUntilMs > millis());
+    xSemaphoreGive(display.mutex);
+    
+    if (!hasCustomContent) {
+        display.showEyes();
+    }
+    // Se c'è contenuto custom, gli occhi torneranno automaticamente
+    // quando customModeUntilMs scade, e useranno serverExpression
 
 
 
@@ -886,23 +906,22 @@ void taskDisplay(void* param) {
   for (;;) {
     RobotState s = getState();
     
-    // ── Cambio espressione automatico in base allo stato ────────────────
+    // ── Cambio espressione automatico ────────────────────────────────
+    // Solo se il server NON ha impostato un'espressione specifica
     if (s != lastState && display.state.mode == DMODE_EYES) {
-      switch (s) {
-        case IDLE:
-          display.setExpression(EXP_NEUTRAL);
-          break;
-        case LISTENING:
-          display.setExpression(EXP_SURPRISED);
-          break;
-        case PROCESSING:
-          display.setExpression(EXP_THINKING);
-          break;
-        case SPEAKING:
-          display.setExpression(EXP_HAPPY);
-          break;
-      }
-      lastState = s;
+        if (!serverExpressionActive) {
+            // Espressione automatica basata sullo stato
+            switch (s) {
+                case IDLE:       display.setExpression(EXP_NEUTRAL);   break;
+                case LISTENING:  display.setExpression(EXP_SURPRISED); break;
+                case PROCESSING: display.setExpression(EXP_THINKING);  break;
+                case SPEAKING:   display.setExpression(EXP_HAPPY);     break;
+            }
+        } else if (s == SPEAKING) {
+            // Usa l'espressione del server
+            display.setExpression(serverExpression);
+        }
+        lastState = s;
     }
     
     // ── Animazione parlato: alterna espressioni durante SPEAKING ────────
@@ -917,6 +936,38 @@ void taskDisplay(void* param) {
         else display.setExpression(EXP_WINK);
         lastSpeakChange = millis();
       }
+    }
+
+
+    // ── Animazione parlato: usa l'espressione LLM come BASE ─────────
+    if (s == SPEAKING && display.state.mode == DMODE_EYES) {
+        static uint32_t lastSpeakChange = 0;
+        if (millis() - lastSpeakChange > 2500) {
+            if (serverExpressionActive) {
+                // ★ FIX: alterna tra espressione LLM e variazioni coerenti
+                int r = random(100);
+                if (r < 60) {
+                    display.setExpression(serverExpression);  // torna all'originale
+                } else if (r < 80) {
+                    display.setExpression(EXP_WINK);  // variazione leggera
+                } else {
+                    display.setExpression(EXP_NEUTRAL);  // pausa neutra
+                }
+            } else {
+                // Fallback: comportamento originale
+                int r = random(100);
+                if (r < 40) display.setExpression(EXP_HAPPY);
+                else if (r < 60) display.setExpression(EXP_NEUTRAL);
+                else if (r < 75) display.setExpression(EXP_EXCITED);
+                else display.setExpression(EXP_WINK);
+            }
+            lastSpeakChange = millis();
+        }
+    }
+    
+    // ── Reset flag server quando torna IDLE ─────────────────────────
+    if (s == IDLE && lastState != IDLE) {
+        serverExpressionActive = false;
     }
     
     // ── Disconnessione: occhi tristi ────────────────────────────────────
@@ -975,12 +1026,11 @@ void taskMic(void* param) {
       //vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
-   
-
+  
     // Flush hardware del buffer I2S
     i2s_zero_dma_buffer(I2S_MIC_PORT);
 
-    Serial.println("[MIC] Drain completato, ascolto attivo.");
+    //Serial.println("[MIC] Drain completato, ascolto attivo.");
 
     // ═══════════════════════════════════════════════════════════════════════
     // ASCOLTO NORMALE con VAD
