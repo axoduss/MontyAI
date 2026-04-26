@@ -1,1 +1,10 @@
-Nothing needs to be added to the .gitignore file since only a Python source file (`server.py`) was modified and no build artifacts, dependencies, or temporary files were included in the changes.
+it_IT-paola-medium.onnx
+it_IT-paola-medium.onnx.json
+it_IT-riccardo-x_low.onnx
+it_IT-riccardo-x_low.onnx.json
+credentials.h
+test.html
+uvicorn
+TTS Voices/
+backup/
+__pycache__/
