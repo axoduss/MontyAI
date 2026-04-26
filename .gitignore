@@ -1,10 +1,67 @@
-it_IT-paola-medium.onnx
-it_IT-paola-medium.onnx.json
-it_IT-riccardo-x_low.onnx
-it_IT-riccardo-x_low.onnx.json
-credentials.h
-test.html
-uvicorn
-TTS Voices/
-backup/
+# Compiled and build artifacts
+*.pyc
 __pycache__/
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.class
+*.out
+
+# Dependencies
+.venv/
+venv/
+.env
+.env.local
+*.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Editors
+.vscode/
+.idea/
+
+# Build directories
+build/
+dist/
+target/
+.mypy_cache/
+.pytest_cache/
+coverage/
+htmlcov/
+.nyc_output/
+*.egg-info/
+
+# System files
+.DS_Store
+Thumbs.db
+.git/
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
