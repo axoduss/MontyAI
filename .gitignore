@@ -1,10 +1,19 @@
-it_IT-paola-medium.onnx
-it_IT-paola-medium.onnx.json
-it_IT-riccardo-x_low.onnx
-it_IT-riccardo-x_low.onnx.json
-credentials.h
-test.html
-uvicorn
-TTS Voices/
-backup/
+```
+# Compiled Python files
+*.pyc
 __pycache__/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+```
