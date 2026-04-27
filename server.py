@@ -30,6 +30,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from faster_whisper import WhisperModel
 import ollama
 
+# Import skill manager
+from skills import execute_skill, get_skills_description
+
 # ─── LOGGING ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +57,7 @@ SYSTEM_PROMPT = """Ti chiami Monty, sei un robot mobile con:
 - 2 bumper (microswitch finecorsa, sinistro e destro)
 - Microfono e speaker
 - Display OLED 128x64 pixel (SSD1306) che mostra i tuoi occhi espressivi
+- Accesso a internet per informazioni in tempo reale (meteo, notizie, ricerche, data/ora)
 Io mi chiamo Andrea.
 
 Rispondi SEMPRE e SOLO con un JSON valido, nessun testo fuori dal JSON.
@@ -159,6 +163,38 @@ Note sui LED:
 - I LED sono numerati da 0 a 3
 
 ═══════════════════════════════════════════════════════════════
+SKILL ESTERNE DISPONIBILI (accesso internet e informazioni):
+═══════════════════════════════════════════════════════════════
+Puoi usare queste skill per ottenere informazioni in tempo reale.
+Per usarle, INCLUDI nel campo "commands" un comando speciale con cmd="use_skill".
+
+Formato:
+{"cmd": "use_skill", "params": {"skill": "<nome_skill>", ...parametri specifici...}}
+
+Skill disponibili:
+
+1. get_current_datetime - Data e ora attuali
+   Parametri: nessuno
+   Esempio: {"cmd": "use_skill", "params": {"skill": "get_current_datetime"}}
+
+2. get_weather - Meteo attuale
+   Parametri: location (opzionale), lat (opzionale), lon (opzionale)
+   Esempio: {"cmd": "use_skill", "params": {"skill": "get_weather", "location": "Milano"}}
+
+3. get_news - Ultime notizie
+   Parametri: category (general/cronaca/politica/economia/sport/tecnologia), limit (default 3)
+   Esempio: {"cmd": "use_skill", "params": {"skill": "get_news", "category": "politica", "limit": 2}}
+
+4. web_search - Ricerca su internet
+   Parametri: query (obbligatorio), limit (default 3)
+   Esempio: {"cmd": "use_skill", "params": {"skill": "web_search", "query": "chi è il presidente italiano"}}
+
+NOTA IMPORTANTE: Quando usi una skill, il sistema eseguirà la funzione e otterrà i dati.
+Dopo aver ricevuto i dati, potrai formularli in una risposta naturale all'utente.
+Se la richiesta dell'utente riguarda informazioni che richiedono dati aggiornati (meteo, notizie, 
+ricerche, data/ora), USA SEMPRE la skill appropriata prima di rispondere.
+
+═══════════════════════════════════════════════════════════════
 ESEMPI COMPLETI:
 ═══════════════════════════════════════════════════════════════
 
@@ -174,7 +210,7 @@ Utente: "Come ti senti?"
 {"commands":[],"speech":"Mi sento alla grande oggi!","emotion":"happy"}
 
 Utente: "Che ore sono?"
-{"commands":[],"speech":"Non ho un orologio, ma posso mostrartelo sul display se me lo dici tu!","emotion":"thinking","display":{"cmd":"display_text","params":{"line1":"Non ho","line2":"un orologio!","size":2,"duration_ms":4000}}}
+{"commands":[{"cmd":"use_skill","params":{"skill":"get_current_datetime"}}],"speech":"Sto controllando l'orario...","emotion":"thinking"}
 
 Utente: "Fermati"
 {"commands":[{"cmd":"stop","params":{}}],"speech":"Mi fermo!","emotion":"neutral"}
@@ -196,6 +232,12 @@ Utente: "Fai i LED tricolore italiano"
 
 Utente: "Indietreggia un po'"
 {"commands":[{"cmd":"move_backward","params":{"speed":120,"duration_ms":1000}}],"speech":"Faccio retromarcia!","emotion":"neutral"}
+
+Utente: "Che tempo fa oggi?"
+{"commands":[{"cmd":"use_skill","params":{"skill":"get_weather"}}],"speech":"Sto controllando il meteo per te...","emotion":"thinking"}
+
+Utente: "Qual è l'ultima notizia di politica?"
+{"commands":[{"cmd":"use_skill","params":{"skill":"get_news","category":"politica","limit":1}}],"speech":"Sto cercando le ultime notizie...","emotion":"thinking"}
 
 Se la richiesta non riguarda nessun comando disponibile:
 {"commands":[],"speech":"Non riesco ancora a farlo, sono in fase di sviluppo.","emotion":"confused"}
@@ -422,6 +464,62 @@ async def safe_send_cmd(payload: str):
     return False
             
             
+
+def format_skill_response(speech: str, skill_results: dict) -> str:
+    """
+    Formatta la risposta speech includendo i dati delle skill eseguite.
+    L'LLM genera uno speech template che può contenere placeholder come:
+    - {datetime}, {date}, {time} per get_current_datetime
+    - {temperature}, {weather}, {description} per get_weather
+    - {news} per get_news
+    - {search_results} per web_search
+    """
+    if not skill_results:
+        return speech
+    
+    format_data = {}
+    
+    for skill_name, result in skill_results.items():
+        if not result.get("success", False):
+            continue
+            
+        data = result.get("data", {})
+        
+        if skill_name == "get_current_datetime":
+            format_data["datetime"] = data.get("datetime", "")
+            format_data["date"] = data.get("date", "")
+            format_data["time"] = data.get("time", "")
+            format_data["day_of_week"] = data.get("day_of_week", "")
+            
+        elif skill_name == "get_weather":
+            format_data["temperature"] = f"{data.get('temperature', 0)}°C"
+            format_data["description"] = data.get("description", "")
+            format_data["weather"] = f"{format_data['description']}, {format_data['temperature']}"
+            format_data["windspeed"] = f"{data.get('windspeed', 0)} km/h"
+            
+        elif skill_name == "get_news":
+            news_list = data.get("news", [])
+            if news_list:
+                news_summary = ". ".join([n["title"] for n in news_list[:2]])
+                format_data["news"] = news_summary
+                format_data["news_source"] = data.get("source", "")
+                
+        elif skill_name == "web_search":
+            results = data.get("results", [])
+            if results:
+                search_summary = ". ".join([r["title"] for r in results[:2]])
+                format_data["search_results"] = search_summary
+    
+    # Sostituisci i placeholder nello speech
+    try:
+        formatted = speech.format(**format_data)
+        log.info("[SkillResponse] Speech formattato: %s", formatted)
+        return formatted
+    except KeyError as e:
+        log.warning("[SkillResponse] Placeholder mancante: %s, uso speech originale", e)
+        return speech
+
+
 # ─── PIPELINE PRINCIPALE ─────────────────────────────────────────────────────
 async def run_pipeline(audio_bytes: bytes):
     """Esegue STT → LLM → esecuzione comandi → TTS."""
@@ -449,13 +547,33 @@ async def run_pipeline(audio_bytes: bytes):
     result = await process_with_llm(transcript)
     robot.log_event("llm_result", {"result": result})
 
-    # ── ESEGUI COMANDI ────────────────────────────────────────────────────────
+    # ── ESEGUI COMANDI (incluso skill) ────────────────────────────────────────
     
-    # ── COMANDI + TTS in parallelo ──
+    # Separa le skill dagli altri comandi hardware
     commands = result.get("commands", [])
     speech = result.get("speech", "")
     emotion  = result.get("emotion", "neutral")
     display_cmd = result.get("display", None)
+    
+    # Esegui prima le skill (se presenti) per ottenere dati aggiornati
+    skill_results = {}
+    hardware_commands = []
+    
+    for cmd_obj in commands:
+        if cmd_obj.get("cmd") == "use_skill":
+            skill_name = cmd_obj.get("params", {}).get("skill")
+            if skill_name:
+                log.info("[Pipeline] Esecuzione skill: %s", skill_name)
+                skill_result = await execute_command(cmd_obj)
+                skill_results[skill_name] = skill_result
+        else:
+            hardware_commands.append(cmd_obj)
+    
+    # Se ci sono skill eseguite, aggiorna lo speech con i risultati
+    if skill_results and speech:
+        # Costruisci una risposta che include i dati delle skill
+        formatted_speech = format_skill_response(speech, skill_results)
+        speech = formatted_speech
     
     # Valida emozione
     valid_emotions = {
@@ -466,15 +584,15 @@ async def run_pipeline(audio_bytes: bytes):
         log.warning("[Pipeline] Emozione '%s' non valida, uso 'neutral'", emotion)
         emotion = "neutral"
 
-    log.info("[Pipeline] emotion=%s, commands=%d, display=%s, speech=%s",
-             emotion, len(commands), bool(display_cmd), bool(speech))
+    log.info("[Pipeline] emotion=%s, hw_commands=%d, skills=%d, display=%s, speech=%s",
+             emotion, len(hardware_commands), len(skill_results), bool(display_cmd), bool(speech))
     
     
-    # ── COMANDI + DISPLAY + TTS in parallelo ─────────────────────────────────
+    # ── COMANDI HARDWARE + DISPLAY + TTS in parallelo ─────────────────────────
     tasks = []
 
-    if commands:
-        tasks.append(execute_commands_parallel(commands))
+    if hardware_commands:
+        tasks.append(execute_commands_parallel(hardware_commands))
         
     # Comando display opzionale da LLM
     if display_cmd and isinstance(display_cmd, dict):
@@ -611,6 +729,20 @@ async def execute_command(cmd_obj: dict):
     cmd    = cmd_obj.get("cmd")
     params = cmd_obj.get("params", {})
 
+    # Skill esterne (non vengono inviate all'ESP32, gestite dal server)
+    if cmd == "use_skill":
+        skill_name = params.get("skill")
+        if not skill_name:
+            log.warning("[SKILL] Nome skill mancante")
+            return {"success": False, "error": "Skill name missing"}
+        
+        # Estrai parametri della skill (rimuovendo "skill" dal dict)
+        skill_params = {k: v for k, v in params.items() if k != "skill"}
+        
+        log.info("[SKILL] Esecuzione: %s con params: %s", skill_name, skill_params)
+        result = await execute_skill(skill_name, **skill_params)
+        return result
+    
     allowed = {
         "set_led", "set_led_off",
         "move_forward", "move_backward",
