@@ -387,6 +387,9 @@ async def synthesize_and_send(text: str, emotion: str = "happy"):
                 log.warning("[TTS] Invio chunk %d fallito: %s", chunks_sent, e)
                 break
 
+        # Attendi un breve delay per assicurarsi che l'ESP32 abbia finito di riprodurre
+        await asyncio.sleep(0.3)  # 300ms di buffer dopo la fine dell'audio
+        
         # Invia segnale tts_end all'ESP32
         await safe_send_cmd(json.dumps({
             "cmd": "tts_end",
@@ -494,7 +497,9 @@ async def run_pipeline(audio_bytes: bytes):
 
     if speech:
         robot.log_event("tts_end", {})
-
+        
+    # Imposta stato idle SOLO dopo che il TTS è completato
+    # Questo assicura che l'audio del robot non venga riascoltato
     await set_robot_state("idle")
 
 
@@ -867,6 +872,11 @@ async def ws_audio(ws: WebSocket):
                 break
 
             if "bytes" in msg:
+                # Ignora audio se il robot sta parlando (evita eco/feedback)
+                if robot.current_state == "speaking":
+                    log.debug("[WS Audio] Skip audio chunk: robot is speaking")
+                    continue
+                    
                 chunk = msg["bytes"]
                 robot.is_recording = True
                 # Accesso al buffer protetto da lock
@@ -881,6 +891,11 @@ async def ws_audio(ws: WebSocket):
                     continue
 
                 if data.get("type") == "end_of_speech":
+                    # Ignora end_of_speech se il robot sta parlando
+                    if robot.current_state == "speaking":
+                        log.debug("[WS Audio] Skip end_of_speech: robot is speaking")
+                        continue
+                        
                     log.info("[WS Audio] end_of_speech ricevuto. Buffer: %d byte, recording: %s",
                         sum(len(c) for c in robot.audio_buffer), robot.is_recording)
                         
