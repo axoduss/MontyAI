@@ -1,14 +1,6 @@
 """
 ROBOT SERVER - Fase 1: MIC/STT + LED (CORRETTO)
-Stack: FastAPI + WebSockets | FasterWhisper STT | Ollama (Gemma3) | Piper TTS
-
-Fix applicati:
-  #1 - asyncio.Lock sul buffer audio
-  #2 - Safe pipeline wrapper con error handling
-  #3 - Segnali tts_start / tts_end verso ESP32
-  #4 - Gestione RuntimeError nei WebSocket handler
-  #5 - log_event robusto
-  #6 - Invio comandi con check connessione
+Stack: FastAPI + WebSockets | FasterWhisper STT | Ollama | Piper TTS
 
 Avvio:
     uvicorn server:app --host 0.0.0.0 --port 8765 --reload
@@ -46,7 +38,7 @@ SAMPLE_RATE      = 16000
 BITS_PER_SAMPLE  = 16
 CHANNELS         = 1
 WHISPER_MODEL    = "base"
-OLLAMA_MODEL     = "gemma3:12b"
+OLLAMA_MODEL     = "gemma4:e4b"
 OLLAMA_HOST      = "http://127.0.0.1:11434"
 MAX_AUDIO_SEC    = 30
 
