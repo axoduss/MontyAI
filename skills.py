@@ -18,8 +18,12 @@ log = logging.getLogger("robot.skills")
 
 # ─── CONFIG SKILL ──────────────────────────────────────────────────────────────
 # Coordinate default (Roma, modificabile in base alla posizione reale)
-DEFAULT_LAT = 41.9028
-DEFAULT_LON = 12.4964
+#DEFAULT_LAT = 41.9028
+#DEFAULT_LON = 12.4964
+
+DEFAULT_LAT = 45.1742
+DEFAULT_LON = 9.6586
+
 
 # ─── SKILL DEFINITIONS ─────────────────────────────────────────────────────────
 
@@ -109,12 +113,12 @@ async def get_news(category: str = "general", limit: int = 3) -> Dict[str, Any]:
     """
     # Feed RSS pubblici italiani (ANSA, Corriere, Repubblica, ecc.)
     feeds = {
-        "general": "https://www.ansait/rss/homepage.xml",
-        "cronaca": "https://www.ansait/rss/cronaca.xml",
-        "politica": "https://www.ansait/rss/politica.xml",
-        "economia": "https://www.ansait/rss/economia.xml",
-        "sport": "https://www.ansait/rss/sport.xml",
-        "tecnologia": "https://www.ansait/rss/tecnologia.xml"
+        "general": "https://www.ansa.it/sito/ansait_rss.xml",
+        "cronaca": "https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml",
+        "politica": "https://www.ansa.it/sito/notizie/politica/politica_rss.xml",
+        "economia": "https://www.ansa.it/sito/notizie/economia/economia_rss.xml",
+        "sport": "https://www.ansa.it/sito/notizie/sport/sport_rss.xml",
+        "tecnologia": "https://www.ansa.it/canale_tecnologia/notizie/tecnologia_rss.xml"
     }
     
     feed_url = feeds.get(category, feeds["general"])

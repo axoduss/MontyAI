@@ -1,6 +1,7 @@
 ```
 # Compiled Python files
 *.pyc
+*.pyo
 __pycache__/
 
 # Logs and temp files
@@ -16,4 +17,16 @@ __pycache__/
 # Editors
 .vscode/
 .idea/
+
+#other
+voices/
+backup/
+it_IT-paola-medium.onnx
+it_IT-paola-medium.onnx.json
+it_IT-riccardo-x_low.onnx
+it_IT-riccardo-x_low.onnx.json
+credentials.h
+test.html
+uvicorn
+
 ```
