@@ -543,15 +543,24 @@ def format_skill_response(speech: str, skill_results: dict) -> str:
         elif skill_name == "get_news":
             news_list = data.get("news", [])
             if news_list:
-                news_summary = ". ".join([n["title"] for n in news_list[:2]])
-                format_data["news"] = news_summary
-                format_data["news_source"] = data.get("source", "")
+                news_text = "\n".join(
+                    f"  • {n.get('title', '?')}"
+                    for n in news_list
+                )
+                parts.append(f"- Notizie ({data.get('source', 'fonte sconosciuta')}):\n{news_text}")
+            else:
+                parts.append("- Notizie: nessuna trovata")
                 
         elif skill_name == "web_search":
             results = data.get("results", [])
             if results:
-                search_summary = ". ".join([r["title"] for r in results[:2]])
-                format_data["search_results"] = search_summary
+                search_text = "\n".join(
+                    f"  • {r.get('title', '?')}"
+                    for r in results
+                )
+                parts.append(f"- Ricerca web (query: {data.get('query', '?')}):\n{search_text}")
+            else:
+                parts.append("- Ricerca web: nessun risultato")
     
     # Sostituisci i placeholder nello speech
     try:
