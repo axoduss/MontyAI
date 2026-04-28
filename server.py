@@ -455,7 +455,58 @@ async def safe_send_cmd(payload: str):
             # robot.cmd_ws = None
     return False
             
-            
+def _format_skill_data_for_llm(skill_results: dict) -> str:
+    """Formatta i risultati delle skill in testo leggibile per il secondo prompt LLM."""
+    parts = []
+
+    for skill_name, result in skill_results.items():
+        if not result or not result.get("success", False):
+            parts.append(f"- {skill_name}: ERRORE - {result.get('error', 'sconosciuto')}")
+            continue
+
+        data = result.get("data", {})
+
+        if skill_name == "get_current_datetime":
+            parts.append(
+                f"- Data/Ora: {data.get('day_of_week', '')} {data.get('date', '')}, "
+                f"ore {data.get('time', '')}"
+            )
+
+        elif skill_name == "get_weather":
+            parts.append(
+                f"- Meteo ({data.get('location', 'posizione corrente')}): "
+                f"{data.get('description', '?')}, "
+                f"temperatura {data.get('temperature', '?')}°C, "
+                f"vento {data.get('windspeed', '?')} km/h"
+            )
+
+        elif skill_name == "get_news":
+            news_list = data.get("news", [])
+            if news_list:
+                news_text = "\n".join(
+                    f"  • {n.get('title', '?')} ({n.get('source', '?')})"
+                    for n in news_list
+                )
+                parts.append(f"- Notizie ({data.get('source', '')}):\n{news_text}")
+            else:
+                parts.append("- Notizie: nessuna trovata")
+
+        elif skill_name == "web_search":
+            results = data.get("results", [])
+            if results:
+                search_text = "\n".join(
+                    f"  • {r.get('title', '?')}: {r.get('snippet', '')}"
+                    for r in results
+                )
+                parts.append(f"- Ricerca web (query: {data.get('query', '?')}):\n{search_text}")
+            else:
+                parts.append("- Ricerca web: nessun risultato")
+
+        else:
+            # Fallback generico
+            parts.append(f"- {skill_name}: {json.dumps(data, ensure_ascii=False)[:300]}")
+
+    return "\n".join(parts)            
 
 def format_skill_response(speech: str, skill_results: dict) -> str:
     """
@@ -534,7 +585,7 @@ async def run_pipeline(audio_bytes: bytes):
         await set_robot_state("idle")
         return
 
-    # ── LLM ──────────────────────────────────────────────────────────────────
+    # ── LLM (prima richiesta) ───────────────────────────────────────────────
     robot.log_event("llm_start", {"input": transcript})
     result = await process_with_llm(transcript)
     robot.log_event("llm_result", {"result": result})
@@ -550,22 +601,50 @@ async def run_pipeline(audio_bytes: bytes):
     # Esegui prima le skill (se presenti) per ottenere dati aggiornati
     skill_results = {}
     hardware_commands = []
-    
+
+
     for cmd_obj in commands:
         if cmd_obj.get("cmd") == "use_skill":
+            skill_commands.append(cmd_obj)
+        else:
+            hardware_commands.append(cmd_obj)
+    
+    # ── Esegui skill e, se presenti, fai un SECONDO passaggio LLM ──
+    if skill_commands:
+        skill_results = {}
+        for cmd_obj in skill_commands:
             skill_name = cmd_obj.get("params", {}).get("skill")
             if skill_name:
                 log.info("[Pipeline] Esecuzione skill: %s", skill_name)
                 skill_result = await execute_command(cmd_obj)
                 skill_results[skill_name] = skill_result
-        else:
-            hardware_commands.append(cmd_obj)
-    
-    # Se ci sono skill eseguite, aggiorna lo speech con i risultati
-    if skill_results and speech:
-        # Costruisci una risposta che include i dati delle skill
-        formatted_speech = format_skill_response(speech, skill_results)
-        speech = formatted_speech
+
+        # ── SECONDO PASSAGGIO LLM con i dati delle skill ──
+        if skill_results:
+            skill_data_summary = _format_skill_data_for_llm(skill_results)
+            log.info("[Pipeline] Re-prompt LLM con dati skill: %s", skill_data_summary[:200])
+
+            followup_prompt = (
+                f"L'utente ha chiesto: \"{transcript}\"\n\n"
+                f"Ho eseguito le skill e ottenuto questi dati:\n{skill_data_summary}\n\n"
+                f"Ora rispondi all'utente usando questi dati reali. "
+                f"NON usare use_skill, i dati li hai già. "
+                f"Rispondi con il solito formato JSON."
+            )
+
+            robot.log_event("llm_followup_start", {"input": followup_prompt})
+            result2 = await process_with_llm(followup_prompt)
+            robot.log_event("llm_followup_result", {"result": result2})
+
+            # Aggiorna speech, emotion, display dal secondo passaggio
+            speech = result2.get("speech", speech)
+            emotion = result2.get("emotion", emotion)
+            display_cmd = result2.get("display", display_cmd)
+
+            # Aggiungi eventuali comandi hardware dal secondo passaggio
+            for cmd_obj in result2.get("commands", []):
+                if cmd_obj.get("cmd") != "use_skill":
+                    hardware_commands.append(cmd_obj)
     
     # Valida emozione
     valid_emotions = {
@@ -626,6 +705,51 @@ async def run_pipeline_from_text(text: str):
     speech = result.get("speech", "")
     emotion  = result.get("emotion", "neutral")
     display_cmd = result.get("display", None)
+
+    skill_commands = []
+    hardware_commands = []
+
+    for cmd_obj in commands:
+        if cmd_obj.get("cmd") == "use_skill":
+            skill_commands.append(cmd_obj)
+        else:
+            hardware_commands.append(cmd_obj)
+
+
+    # ── Esegui skill + secondo passaggio LLM ──
+    if skill_commands:
+        skill_results = {}
+        for cmd_obj in skill_commands:
+            skill_name = cmd_obj.get("params", {}).get("skill")
+            if skill_name:
+                log.info("[Pipeline Text] Esecuzione skill: %s", skill_name)
+                skill_result = await execute_command(cmd_obj)
+                skill_results[skill_name] = skill_result
+
+        if skill_results:
+            skill_data_summary = _format_skill_data_for_llm(skill_results)
+            log.info("[Pipeline Text] Re-prompt con dati: %s", skill_data_summary[:200])
+
+            followup_prompt = (
+                f"L'utente ha chiesto: \"{text}\"\n\n"
+                f"Ho eseguito le skill e ottenuto questi dati:\n{skill_data_summary}\n\n"
+                f"Ora rispondi all'utente usando questi dati reali. "
+                f"NON usare use_skill, i dati li hai già. "
+                f"Rispondi con il solito formato JSON."
+            )
+
+            result2 = await process_with_llm(followup_prompt)
+            robot.log_event("llm_followup_result", {"result": result2})
+
+            speech = result2.get("speech", speech)
+            emotion = result2.get("emotion", emotion)
+            display_cmd = result2.get("display", display_cmd)
+
+            for cmd_obj in result2.get("commands", []):
+                if cmd_obj.get("cmd") != "use_skill":
+                    hardware_commands.append(cmd_obj)
+
+    
     
     # Valida emozione
     valid_emotions = {
