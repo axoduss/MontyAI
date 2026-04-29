@@ -96,7 +96,7 @@ Adafruit_NeoPixel strip(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 DisplayManager display;
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
-enum RobotState { IDLE, LISTENING, PROCESSING, SPEAKING };
+enum RobotState { IDLE, LISTENING, PROCESSING, SPEAKING, PLAYING_MUSIC };
 
 // Mutex per proteggere robotState da accessi concorrenti
 SemaphoreHandle_t stateMutex;
@@ -855,6 +855,30 @@ void handleCommand(const char* json) {
   // ── tts_end ───────────────────────────────────────────────────────────────
   else if (strcmp(cmd, "tts_end") == 0) {
     ttsEndReceived = true;
+  }
+
+
+    // ── music_start ───────────────────────────────────────────────────────────
+  else if (strcmp(cmd, "music_start") == 0) {
+    ttsEndReceived = false;
+    ttsPlaying = true;
+    setState(PLAYING_MUSIC);
+    userLedOverride = false;
+
+    // Mostra un'icona musicale sul display
+    xSemaphoreTake(display.mutex, portMAX_DELAY);
+    display.state.mode = DMODE_ICON;
+    display.state.iconId = 3; // Supponendo che 3 sia l'icona della musica
+    const char* title = doc["params"]["title"] | "Musica";
+    strncpy(display.state.iconText, title, sizeof(display.state.iconText) - 1);
+    display.state.customModeUntilMs = millis() + 60000; // Max 60s
+    xSemaphoreGive(display.mutex);
+  }
+
+  // ── music_stop ────────────────────────────────────────────────────────────
+  else if (strcmp(cmd, "music_stop") == 0) {
+    ttsEndReceived = true; // Sfruttiamo la stessa logica di fine del TTS
+    display.showEyes();    // Torna agli occhi
   }
 
   // ── ping ──────────────────────────────────────────────────────────────────

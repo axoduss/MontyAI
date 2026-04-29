@@ -164,9 +164,73 @@ def transcribe_audio(raw_bytes: bytes) -> str:
     return text
 
 
+async def send_music_to_esp32(pcm_bytes: bytes, title: str):
+    """Invia audio musicale all'ESP32, interrompibile."""
+    if not robot.cmd_ws:
+        log.warning("[Music] Nessun ESP32 connesso")
+        return
+
+    music_abort_event.clear()
+    log.info("[Music] Invio '%s': %d bytes (%.1fs)",
+             title, len(pcm_bytes), len(pcm_bytes) / (22050 * 2))
+
+    # Segnala inizio riproduzione
+    await safe_send_cmd(json.dumps({
+        "cmd": "music_start",
+        "params": {
+            "bytes": len(pcm_bytes),
+            "title": title,
+            "expression": "happy"
+        }
+    }))
+
+    await set_robot_state("playing_music")
+    robot.log_event("music_start", {"title": title, "bytes": len(pcm_bytes)})
+
+    # Invio a chunk con controllo abort
+    chunk_size = 1024
+    BATCH_SIZE = 12
+    BATCH_DELAY = 0.10
+    chunks_sent = 0
+    aborted = False
+
+    for i in range(0, len(pcm_bytes), chunk_size):
+        # Controlla abort
+        if music_abort_event.is_set():
+            log.info("[Music] Riproduzione interrotta al chunk %d", chunks_sent)
+            aborted = True
+            break
+
+        chunk = pcm_bytes[i:i + chunk_size]
+        try:
+            await robot.cmd_ws.send_bytes(chunk)
+            chunks_sent += 1
+            if chunks_sent % BATCH_SIZE == 0:
+                await asyncio.sleep(BATCH_DELAY)
+        except Exception as e:
+            log.warning("[Music] Invio fallito al chunk %d: %s", chunks_sent, e)
+            aborted = True
+            break
+
+    # Segnala fine (o interruzione)
+    await asyncio.sleep(0.2)
+    await safe_send_cmd(json.dumps({
+        "cmd": "music_stop",
+        "params": {"reason": "aborted" if aborted else "completed"}
+    }))
+
+    robot.log_event("music_end", {
+        "title": title,
+        "chunks_sent": chunks_sent,
+        "aborted": aborted
+    })
+
+    log.info("[Music] %s: %d chunk inviati",
+             "Interrotta" if aborted else "Completata", chunks_sent)
+
 # ─── LLM + FUNCTION CALLING ──────────────────────────────────────────────────
 async def process_with_llm(text: str) -> dict:
-    """Invia testo a Gemma3 via Ollama, riceve JSON comandi."""
+    """Invia testo ad Ollama, riceve JSON comandi."""
     log.info("[LLM] Input: '%s'", text)
 
     try:
@@ -409,7 +473,8 @@ async def run_pipeline(audio_bytes: bytes):
     display_cmd = result.get("display", None)
     
     # Esegui prima le skill (se presenti) per ottenere dati aggiornati
-    skill_results = {}
+    #skill_results = {}
+    skill_commands = []
     hardware_commands = []
 
 
@@ -422,12 +487,21 @@ async def run_pipeline(audio_bytes: bytes):
     # ── Esegui skill e, se presenti, fai un SECONDO passaggio LLM ──
     if skill_commands:
         skill_results = {}
+        music_pcm = None
+        music_title = None
+        
         for cmd_obj in skill_commands:
             skill_name = cmd_obj.get("params", {}).get("skill")
             if skill_name:
                 log.info("[Pipeline] Esecuzione skill: %s", skill_name)
                 skill_result = await execute_command(cmd_obj)
                 skill_results[skill_name] = skill_result
+        
+                # Controlla se la skill ha prodotto audio da riprodurre 
+                if (skill_result.get("success") and
+                    skill_result.get("data", {}).get("_pcm_data")):
+                    music_pcm = skill_result["data"].pop("_pcm_data")
+                    music_title = skill_result["data"].get("title", "Musica")
 
         # ── SECONDO PASSAGGIO LLM con i dati delle skill ──
         if skill_results:
@@ -496,6 +570,11 @@ async def run_pipeline(audio_bytes: bytes):
 
     if speech:
         robot.log_event("tts_end", {})
+        
+    # Dopo il TTS (speech), riproduci la musica
+    if music_pcm:
+        #await set_robot_state("speaking")
+        await send_music_to_esp32(music_pcm, music_title)
         
     # Imposta stato idle SOLO dopo che il TTS è completato
     # Questo assicura che l'audio del robot non venga riascoltato
@@ -576,7 +655,7 @@ async def run_pipeline_from_text(text: str):
              
     tasks = []
 
-    if commands:
+    if hardware_commands:
         tasks.append(execute_commands_parallel(commands))
         
         
@@ -643,10 +722,47 @@ def classify_command(cmd: str) -> str:
     return "system"
 
 
+
+
+# ─── KEYWORDS DI STOP MUSICA ─────────────────────────────────────────────────
+MUSIC_STOP_KEYWORDS = {
+    "stop", "basta", "ferma", "fermati", "smetti",
+    "silenzio", "zitto", "spegni", "fine", "basta musica",
+    "ferma la musica", "stop musica"
+}
+
+
+async def _check_music_stop_command(audio_bytes: bytes):
+    """STT rapido per rilevare comandi di stop durante la musica."""
+    try:
+        transcript = await asyncio.to_thread(transcribe_audio, audio_bytes)
+        transcript_lower = transcript.lower().strip()
+
+        log.info("[MusicStop] Trascritto durante musica: '%s'", transcript)
+
+        # Controlla se contiene una keyword di stop
+        is_stop = any(kw in transcript_lower for kw in MUSIC_STOP_KEYWORDS)
+
+        if is_stop:
+            log.info("[MusicStop] Comando STOP rilevato!")
+            music_abort_event.set()
+
+            # Rispondi brevemente
+            await asyncio.sleep(0.5)  # Aspetta che la musica si fermi
+            await set_robot_state("speaking")
+            await synthesize_and_send("Ok, fermo la musica!", "neutral")
+            await set_robot_state("idle")
+        else:
+            log.debug("[MusicStop] Non è un comando stop, ignoro: '%s'", transcript)
+
+    except Exception as e:
+        log.error("[MusicStop] Errore: %s", repr(e))
+
+
 # ─── ESECUZIONE COMANDI ──────────────────────────────────────────────────────
 
-# Event per abort motori (bumper)
-motor_abort_event = asyncio.Event()
+motor_abort_event = asyncio.Event() # Event per abort motori (bumper)
+music_abort_event = asyncio.Event() # Event per abort musica
 
 
 
@@ -887,7 +1003,7 @@ async def set_robot_state(state: str):
     robot.current_state = state
 
     # Notifica ESP32 solo per stati rilevanti
-    if state in ("processing", "idle"):
+    if state in ("processing", "idle", "playing_music"):
         msg = json.dumps({"cmd": "state_update", "params": {"state": state}})
         for attempt in range(3):
             if await safe_send_cmd(msg):
@@ -900,6 +1016,12 @@ async def set_robot_state(state: str):
         await safe_send_cmd(json.dumps({
             "cmd": "display_expression",
             "params": {"expression": "thinking"}
+        }))
+    elif state == "playing_music":
+        robot.current_emotion = "happy"
+        await safe_send_cmd(json.dumps({
+            "cmd": "display_expression",
+            "params": {"expression": "happy"}
         }))
     elif state == "idle":
         robot.current_emotion = "neutral"
@@ -935,9 +1057,17 @@ async def ws_audio(ws: WebSocket):
                     log.debug("[WS Audio] Skip audio chunk: robot is speaking")
                     continue
                     
+                
+                # Durante musica: accumula per rilevare "stop"
+                if robot.current_state == "playing_music":
+                    async with robot.audio_lock:
+                        robot.audio_buffer.append(msg["bytes"])
+                    continue
+                
+                
+                # Stato normale: accumula
                 chunk = msg["bytes"]
                 robot.is_recording = True
-                # Accesso al buffer protetto da lock
                 async with robot.audio_lock:
                     robot.audio_buffer.append(chunk)
 
@@ -957,6 +1087,23 @@ async def ws_audio(ws: WebSocket):
                     log.info("[WS Audio] end_of_speech ricevuto. Buffer: %d byte, recording: %s",
                         sum(len(c) for c in robot.audio_buffer), robot.is_recording)
                         
+                    # Durante musica: controlla se è un comando di stop
+                    if robot.current_state == "playing_music":
+                        async with robot.audio_lock:
+                            if robot.audio_buffer:
+                                audio_data = b"".join(robot.audio_buffer)
+                                robot.audio_buffer = []
+                            else:
+                                audio_data = None
+
+                        if audio_data and len(audio_data) > SAMPLE_RATE * 2 * 0.3:
+                            # STT rapido per vedere se è un comando stop
+                            asyncio.create_task(
+                                _check_music_stop_command(audio_data)
+                            )
+                        continue
+                        
+                    # Stato normale: pipeline completa
                     async with robot.audio_lock:
                         if robot.audio_buffer:
                             full_audio = b"".join(robot.audio_buffer)
@@ -1027,13 +1174,19 @@ async def ws_cmd(ws: WebSocket):
                     motor_abort_event.set()
                     
                     # Lancia pipeline LLM con contesto bumper — non bloccare il loop WS
-                    asyncio.create_task(
-                        safe_run_pipeline_from_text(
-                        f"[EVENTO AUTOMATICO] Monty ha appena colpito un ostacolo con il bumper {side}. "
-                        f"Ha già fatto retromarcia e si è allontanato. "
-                        f"Commenta brevemente la situazione in modo spontaneo e un po' ironico."
+                    
+                    # Se sta suonando musica, fermala anche
+                    if robot.current_state == "playing_music":
+                        music_abort_event.set()
+                    else:
+                        asyncio.create_task(
+                            safe_run_pipeline_from_text(
+                            f"[EVENTO AUTOMATICO] Monty ha appena colpito un ostacolo con il bumper {side}. "
+                            f"Ha già fatto retromarcia e si è allontanato. "
+                            f"Commenta brevemente la situazione in modo spontaneo e un po' ironico."
+                            )
                         )
-                    )
+
 
                 # Eventi motore
                 elif data.get("event") == "motor_timeout":
