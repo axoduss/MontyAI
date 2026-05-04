@@ -485,6 +485,18 @@ async def _core_pipeline(text: str):
         else:
             hardware_commands.append(cmd_obj)
     
+    # =========================================================================
+    # Riproduci subito lo speech di attesa se ci sono skill
+    # =========================================================================
+    if skill_commands and speech:
+        log.info("[Core Pipeline] Riproduzione speech di attesa: '%s'", speech)
+        await set_robot_state("speaking")
+        await synthesize_and_send(speech, emotion)
+        await set_robot_state("processing") # Torna in stato processing per l'attesa
+        speech = "" # Svuota la variabile per fare spazio alla risposta finale
+    # =========================================================================
+    
+    
     # ── ESECUZIONE SKILL E SECONDO PASSAGGIO LLM ────────────────────────────
     music_pcm = None
     music_title = None
@@ -1016,8 +1028,9 @@ async def ws_audio(ws: WebSocket):
 
             if "bytes" in msg:
                 # Ignora audio se il robot sta parlando (evita eco/feedback)
-                if robot.current_state == "speaking":
-                    log.debug("[WS Audio] Skip audio chunk: robot is speaking")
+                #if robot.current_state == "speaking":
+                if robot.current_state in ["speaking", "processing"]:
+                    log.debug("[WS Audio] Skip audio chunk: robot is speaking or processing")
                     continue
                     
                 
