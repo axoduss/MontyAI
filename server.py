@@ -461,45 +461,23 @@ def format_skill_response(speech: str, skill_results: dict) -> str:
 
 
 # ─── PIPELINE PRINCIPALE ─────────────────────────────────────────────────────
-async def run_pipeline(audio_bytes: bytes):
-    """Esegue STT → LLM → esecuzione comandi → TTS."""
-
-    if len(audio_bytes) < SAMPLE_RATE * 2 * 0.3:  # meno di 300ms
-        log.warning("[Pipeline] Audio troppo corto, skip.")
-        await set_robot_state("idle")
-        return
-
-    await set_robot_state("processing")
-    robot.log_event("pipeline_start", {"audio_bytes": len(audio_bytes)})
-
-    # ── STT ──────────────────────────────────────────────────────────────────
-    robot.log_event("stt_start", {})
-    transcript = await asyncio.to_thread(transcribe_audio, audio_bytes)
-    robot.log_event("stt_result", {"text": transcript})
-
-    if not transcript:
-        log.warning("[Pipeline] Trascrizione vuota.")
-        await set_robot_state("idle")
-        return
-
+async def _core_pipeline(text: str):
+    """Logica centralizzata per l'elaborazione del testo: LLM → Comandi/Skill → TTS/Musica."""
+    
     # ── LLM (prima richiesta) ───────────────────────────────────────────────
-    robot.log_event("llm_start", {"input": transcript})
-    result = await process_with_llm(transcript)
+    robot.log_event("llm_start", {"input": text})
+    result = await process_with_llm(text)
     robot.log_event("llm_result", {"result": result})
 
-    # ── ESEGUI COMANDI (incluso skill) ────────────────────────────────────────
-    
-    # Separa le skill dagli altri comandi hardware
+    # ── SEPARAZIONE COMANDI E SKILL ─────────────────────────────────────────
     commands = result.get("commands", [])
     speech = result.get("speech", "")
     emotion  = result.get("emotion", "neutral")
     display_cmd = result.get("display", None)
     
-    # Esegui prima le skill (se presenti) per ottenere dati aggiornati
-    #skill_results = {}
+    skill_results = {}
     skill_commands = []
     hardware_commands = []
-
 
     for cmd_obj in commands:
         if cmd_obj.get("cmd") == "use_skill":
@@ -507,21 +485,21 @@ async def run_pipeline(audio_bytes: bytes):
         else:
             hardware_commands.append(cmd_obj)
     
-    # ── Esegui skill e, se presenti, fai un SECONDO passaggio LLM ──
-    if skill_commands:
-        skill_results = {}
-        music_pcm = None
-        music_title = None
-        
+    # ── ESECUZIONE SKILL E SECONDO PASSAGGIO LLM ────────────────────────────
+    music_pcm = None
+    music_title = None
+    
+    if skill_commands:        
         for cmd_obj in skill_commands:
             skill_name = cmd_obj.get("params", {}).get("skill")
             if skill_name:
-                log.info("[Pipeline] Esecuzione skill: %s", skill_name)
+                log.info("[Core Pipeline] Esecuzione skill: %s", skill_name)
                 skill_result = await execute_command(cmd_obj)
                 skill_results[skill_name] = skill_result
         
                 # Controlla se la skill ha prodotto audio da riprodurre 
-                if (skill_result.get("success") and
+                if (skill_result and 
+                    skill_result.get("success") and
                     skill_result.get("data", {}).get("_pcm_data")):
                     music_pcm = skill_result["data"].pop("_pcm_data")
                     music_title = skill_result["data"].get("title", "Musica")
@@ -529,10 +507,10 @@ async def run_pipeline(audio_bytes: bytes):
         # ── SECONDO PASSAGGIO LLM con i dati delle skill ──
         if skill_results:
             skill_data_summary = _format_skill_data_for_llm(skill_results)
-            log.info("[Pipeline] Re-prompt LLM con dati skill: %s", skill_data_summary[:200])
+            log.info("[Core Pipeline] Re-prompt LLM con dati skill: %s", skill_data_summary[:200])
 
             followup_prompt = (
-                f"L'utente ha chiesto: \"{transcript}\"\n\n"
+                f"L'utente ha chiesto: \"{text}\"\n\n"
                 f"Ho eseguito le skill e ottenuto questi dati:\n{skill_data_summary}\n\n"
                 f"Ora rispondi all'utente usando questi dati reali. "
                 f"NON usare use_skill, i dati li hai già. "
@@ -559,12 +537,11 @@ async def run_pipeline(audio_bytes: bytes):
         "thinking", "love", "wink", "skeptical", "excited", "confused"
     }
     if emotion not in valid_emotions:
-        log.warning("[Pipeline] Emozione '%s' non valida, uso 'neutral'", emotion)
+        log.warning("[Core Pipeline] Emozione '%s' non valida, uso 'neutral'", emotion)
         emotion = "neutral"
 
-    log.info("[Pipeline] emotion=%s, hw_commands=%d, skills=%d, display=%s, speech=%s",
-             emotion, len(hardware_commands), len(skill_results), bool(display_cmd), bool(speech))
-    
+    log.info("[Core Pipeline] emotion=%s, hw_commands=%d, skills=%d, display=%s, speech=%s, music=%s",
+             emotion, len(hardware_commands), len(skill_results), bool(display_cmd), bool(speech), bool(music_pcm))
     
     # ── COMANDI HARDWARE + DISPLAY + TTS in parallelo ─────────────────────────
     tasks = []
@@ -596,12 +573,35 @@ async def run_pipeline(audio_bytes: bytes):
         
     # Dopo il TTS (speech), riproduci la musica
     if music_pcm:
-        #await set_robot_state("speaking")
+        log.info("[Core Pipeline] Avvio riproduzione musica: '%s' (%d bytes)", music_title, len(music_pcm))
         await send_music_to_esp32(music_pcm, music_title)
         
-    # Imposta stato idle SOLO dopo che il TTS è completato
-    # Questo assicura che l'audio del robot non venga riascoltato
+    # Imposta stato idle SOLO dopo che il TTS e l'eventuale musica sono completati
     await set_robot_state("idle")
+
+
+async def run_pipeline(audio_bytes: bytes):
+    """Esegue STT → passa il testo alla pipeline core."""
+    if len(audio_bytes) < SAMPLE_RATE * 2 * 0.3:  # meno di 300ms
+        log.warning("[Pipeline] Audio troppo corto, skip.")
+        await set_robot_state("idle")
+        return
+
+    await set_robot_state("processing")
+    robot.log_event("pipeline_start", {"audio_bytes": len(audio_bytes)})
+
+    # ── STT ──────────────────────────────────────────────────────────────────
+    robot.log_event("stt_start", {})
+    transcript = await asyncio.to_thread(transcribe_audio, audio_bytes)
+    robot.log_event("stt_result", {"text": transcript})
+
+    if not transcript:
+        log.warning("[Pipeline] Trascrizione vuota.")
+        await set_robot_state("idle")
+        return
+
+    # Chiama la logica centralizzata
+    await _core_pipeline(transcript)
 
 
 async def run_pipeline_from_text(text: str):
@@ -609,122 +609,42 @@ async def run_pipeline_from_text(text: str):
     await set_robot_state("processing")
     robot.log_event("text_input", {"text": text})
 
-    result = await process_with_llm(text)
-    robot.log_event("llm_result", {"result": result})
-
-    # ── COMANDI + TTS in parallelo ──
-    commands = result.get("commands", [])
-    speech = result.get("speech", "")
-    emotion  = result.get("emotion", "neutral")
-    display_cmd = result.get("display", None)
-
-    skill_commands = []
-    hardware_commands = []
-
-    for cmd_obj in commands:
-        if cmd_obj.get("cmd") == "use_skill":
-            skill_commands.append(cmd_obj)
-        else:
-            hardware_commands.append(cmd_obj)
+    # Chiama la logica centralizzata
+    await _core_pipeline(text)
 
 
-    # ── Esegui skill + secondo passaggio LLM ──
-    
-    music_pcm = None       
-    music_title = None     
-    
-    
-    if skill_commands:
-        skill_results = {}
-        for cmd_obj in skill_commands:
-            skill_name = cmd_obj.get("params", {}).get("skill")
-            if skill_name:
-                log.info("[Pipeline Text] Esecuzione skill: %s", skill_name)
-                skill_result = await execute_command(cmd_obj)
-                skill_results[skill_name] = skill_result
-                
-                if (skill_result and
-                        skill_result.get("success") and
-                        skill_result.get("data", {}).get("_pcm_data")):
-                        music_pcm = skill_result["data"].pop("_pcm_data")
-                        music_title = skill_result["data"].get("title", "Musica")
 
-        if skill_results:
-            skill_data_summary = _format_skill_data_for_llm(skill_results)
-            log.info("[Pipeline Text] Re-prompt con dati: %s", skill_data_summary[:200])
+async def run_pipeline(audio_bytes: bytes):
+    """Esegue STT → passa il testo alla pipeline core."""
+    if len(audio_bytes) < SAMPLE_RATE * 2 * 0.3:  # meno di 300ms
+        log.warning("[Pipeline] Audio troppo corto, skip.")
+        await set_robot_state("idle")
+        return
 
-            followup_prompt = (
-                f"L'utente ha chiesto: \"{text}\"\n\n"
-                f"Ho eseguito le skill e ottenuto questi dati:\n{skill_data_summary}\n\n"
-                f"Ora rispondi all'utente usando questi dati reali. "
-                f"NON usare use_skill, i dati li hai già. "
-                f"Rispondi con il solito formato JSON."
-            )
+    await set_robot_state("processing")
+    robot.log_event("pipeline_start", {"audio_bytes": len(audio_bytes)})
 
-            result2 = await process_with_llm(followup_prompt)
-            robot.log_event("llm_followup_result", {"result": result2})
+    # ── STT ──────────────────────────────────────────────────────────────────
+    robot.log_event("stt_start", {})
+    transcript = await asyncio.to_thread(transcribe_audio, audio_bytes)
+    robot.log_event("stt_result", {"text": transcript})
 
-            speech = result2.get("speech", speech)
-            emotion = result2.get("emotion", emotion)
-            display_cmd = result2.get("display", display_cmd)
+    if not transcript:
+        log.warning("[Pipeline] Trascrizione vuota.")
+        await set_robot_state("idle")
+        return
 
-            for cmd_obj in result2.get("commands", []):
-                if cmd_obj.get("cmd") != "use_skill":
-                    hardware_commands.append(cmd_obj)
-
-    
-    
-    # Valida emozione
-    valid_emotions = {
-        "neutral", "happy", "sad", "angry", "surprised", "sleepy",
-        "thinking", "love", "wink", "skeptical", "excited", "confused"
-    }
-    if emotion not in valid_emotions:
-        log.warning("[Pipeline Text] Emozione '%s' non valida, uso 'neutral'", emotion)
-        emotion = "neutral"
-
-    log.info("[Pipeline Text] emotion=%s, hw_commands=%d, display=%s, speech=%s, music=%s",
-             emotion, len(hardware_commands), bool(display_cmd), bool(speech), bool(music_pcm))
-             
-    # ── COMANDI HARDWARE + DISPLAY + TTS ──        
-    tasks = []
-
-    if hardware_commands:
-        tasks.append(execute_commands_parallel(commands))
-        
-        
-    if display_cmd and isinstance(display_cmd, dict):
-        display_cmd_name = display_cmd.get("cmd", "")
-        display_params = display_cmd.get("params", {})
-        if display_cmd_name:
-            tasks.append(execute_command({
-                "cmd": display_cmd_name,
-                "params": display_params
-            }))
-
-    if speech and robot.cmd_ws:
-        await set_robot_state("speaking")
-        robot.log_event("tts_start", {"text": speech, "emotion": emotion})
-        tasks.append(synthesize_and_send(speech, emotion))
-
-    if tasks:
-        await asyncio.gather(*tasks)
-
-    if speech:
-        robot.log_event("tts_end", {})
-        
-        
-    # ── MUSICA (dopo il TTS) ──   
-    if music_pcm:
-        log.info("[Pipeline Text] Avvio riproduzione musica: '%s' (%d bytes)",
-                 music_title, len(music_pcm))
-        await send_music_to_esp32(music_pcm, music_title)
-        
-        
-
-    await set_robot_state("idle")
+    # Chiama la logica centralizzata
+    await _core_pipeline(transcript)
 
 
+async def run_pipeline_from_text(text: str):
+    """Pipeline senza STT — usato dalla dashboard."""
+    await set_robot_state("processing")
+    robot.log_event("text_input", {"text": text})
+
+    # Chiama la logica centralizzata
+    await _core_pipeline(text)
 
 
 
