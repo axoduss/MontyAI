@@ -14,7 +14,7 @@ AUDIO_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "audio_cache")
 os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
 
 # Durata massima riproduzione (secondi)
-MAX_PLAY_SECONDS = 60
+MAX_PLAY_SECONDS = 180
 # Sample rate output (deve matchare quello dell'ESP32)
 OUTPUT_SAMPLE_RATE = 22050
 
@@ -24,7 +24,7 @@ class YouTubeSkill(BaseSkill):
     description = "Cerca una canzone su YouTube e la riproduce dall'altoparlante"
     params_schema = {
         "query": "titolo canzone o artista (obbligatorio)",
-        "duration": "secondi da riprodurre, max 60 (default: 30)"
+        "duration": "secondi da riprodurre, max 180 (default: 120)"
     }
     example = '{"cmd":"use_skill","params":{"skill":"play_music","query":"Bohemian Rhapsody Queen"}}'
 

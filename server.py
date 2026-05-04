@@ -189,8 +189,8 @@ async def send_music_to_esp32(pcm_bytes: bytes, title: str):
 
     # Invio a chunk con controllo abort
     chunk_size = 1024
-    BATCH_SIZE = 12
-    BATCH_DELAY = 0.10
+    BATCH_SIZE = 4
+    BATCH_DELAY = 0.08
     chunks_sent = 0
     aborted = False
 
@@ -289,6 +289,29 @@ async def synthesize_and_send(text: str, emotion: str = "happy"):
             log.error("[TTS] Piper stderr: %s", result.stderr.decode(errors='replace'))
             return b""
         return result.stdout
+        
+        
+        
+        raw_pcm = result.stdout
+        if not raw_pcm:
+            return b""
+        
+        # ── Resample da 16000 Hz (Piper x_low) a 22050 Hz (ESP32 I2S) ──
+        PIPER_RATE = 16000
+        ESP32_RATE = 22050
+        
+        samples = np.frombuffer(raw_pcm, dtype=np.int16).astype(np.float32)
+        original_len = len(samples)
+        new_length = int(len(samples) * ESP32_RATE / PIPER_RATE)
+        indices = np.linspace(0, len(samples) - 1, new_length)
+        resampled = np.interp(indices, np.arange(len(samples)), samples)
+        resampled_pcm = resampled.astype(np.int16).tobytes()
+        
+        log.info("[TTS] Resampled: %d → %d Hz (%d → %d samples, %d → %d bytes)",
+                 PIPER_RATE, ESP32_RATE, original_len, new_length,
+                 len(raw_pcm), len(resampled_pcm))
+        
+        return resampled_pcm
 
     try:
         audio_bytes = await asyncio.to_thread(run_piper, text)
@@ -315,8 +338,8 @@ async def synthesize_and_send(text: str, emotion: str = "happy"):
         chunks_sent = 0
         # 1024 byte = 512 campioni @ 22050Hz = ~23.2ms di audio
         # Inviamo a gruppi di 8 chunk, poi aspettiamo
-        BATCH_SIZE = 8
-        BATCH_DELAY = 0.15  # 150ms ≈ ~185ms di audio in 8 chunk
+        BATCH_SIZE = 4
+        BATCH_DELAY = 0.08  # 150ms ≈ ~185ms di audio in 8 chunk
         
         for i in range(0, len(audio_bytes), chunk_size):
             chunk = audio_bytes[i:i + chunk_size]
@@ -606,6 +629,11 @@ async def run_pipeline_from_text(text: str):
 
 
     # ── Esegui skill + secondo passaggio LLM ──
+    
+    music_pcm = None       
+    music_title = None     
+    
+    
     if skill_commands:
         skill_results = {}
         for cmd_obj in skill_commands:
@@ -614,6 +642,12 @@ async def run_pipeline_from_text(text: str):
                 log.info("[Pipeline Text] Esecuzione skill: %s", skill_name)
                 skill_result = await execute_command(cmd_obj)
                 skill_results[skill_name] = skill_result
+                
+                if (skill_result and
+                        skill_result.get("success") and
+                        skill_result.get("data", {}).get("_pcm_data")):
+                        music_pcm = skill_result["data"].pop("_pcm_data")
+                        music_title = skill_result["data"].get("title", "Musica")
 
         if skill_results:
             skill_data_summary = _format_skill_data_for_llm(skill_results)
@@ -649,10 +683,10 @@ async def run_pipeline_from_text(text: str):
         log.warning("[Pipeline Text] Emozione '%s' non valida, uso 'neutral'", emotion)
         emotion = "neutral"
 
-    log.info("[Pipeline Text] emotion=%s, commands=%d, display=%s, speech=%s",
-             emotion, len(commands), bool(display_cmd), bool(speech))
+    log.info("[Pipeline Text] emotion=%s, hw_commands=%d, display=%s, speech=%s, music=%s",
+             emotion, len(hardware_commands), bool(display_cmd), bool(speech), bool(music_pcm))
              
-             
+    # ── COMANDI HARDWARE + DISPLAY + TTS ──        
     tasks = []
 
     if hardware_commands:
@@ -678,6 +712,15 @@ async def run_pipeline_from_text(text: str):
 
     if speech:
         robot.log_event("tts_end", {})
+        
+        
+    # ── MUSICA (dopo il TTS) ──   
+    if music_pcm:
+        log.info("[Pipeline Text] Avvio riproduzione musica: '%s' (%d bytes)",
+                 music_title, len(music_pcm))
+        await send_music_to_esp32(music_pcm, music_title)
+        
+        
 
     await set_robot_state("idle")
 

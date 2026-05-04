@@ -1147,6 +1147,7 @@ void taskSpeaker(void* param) {
       RobotState currentState = getState(); 
 
       if (currentState == SPEAKING) {
+      //if (currentState == SPEAKING || currentState == PLAYING_MUSIC) {
         // Fine TTS solo se:
         //   1. Il server ha inviato tts_end E la coda è vuota
         //   2. OPPURE timeout di sicurezza (nessun chunk per 5s)
