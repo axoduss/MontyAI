@@ -22,8 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from faster_whisper import WhisperModel
 import ollama
 
-# Import skill manager
-#from skills import execute_skill, get_skills_description
+#Import skill manager
 from skills import execute_skill, format_skill_result, get_skills_prompt_section
 
 # ─── LOGGING ─────────────────────────────────────────────────────────────────
@@ -228,7 +227,7 @@ async def send_music_to_esp32(pcm_bytes: bytes, title: str):
     log.info("[Music] %s: %d chunk inviati",
              "Interrotta" if aborted else "Completata", chunks_sent)
 
-# ─── LLM + FUNCTION CALLING ──────────────────────────────────────────────────
+# ─── LLM  ──────────────────────────────────────────────────
 async def process_with_llm(text: str) -> dict:
     """Invia testo ad Ollama, riceve JSON comandi."""
     log.info("[LLM] Input: '%s'", text)
@@ -1014,7 +1013,7 @@ async def ws_audio(ws: WebSocket):
     log.info("[WS Audio] ESP32 connesso.")
     robot.log_event("esp32_audio_connected", {})
 
-    # FIX #1: Pulisci buffer con lock
+    #Pulisci buffer con lock
     async with robot.audio_lock:
         robot.audio_buffer = []
 

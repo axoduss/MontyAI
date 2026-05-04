@@ -238,69 +238,71 @@ private:
   // ══════════════════════════════════════════════════════════════════════════
   
   void updateAnimations(uint32_t now) {
-    // ── Blink automatico ────────────────────────────────────────────────
-    if (!state.isBlinking && now >= state.nextBlinkMs) {
-      state.isBlinking = true;
-      state.blinkStartMs = now;
-      state.blinkPhase = 1;  // inizia a chiudere
-    }
-    
-    if (state.isBlinking) {
-      uint32_t elapsed = now - state.blinkStartMs;
+    // ── Blink automatico (disabilitato durante EXP_LOVE) ────────────────
+    if (state.expression != EXP_LOVE) {
+      if (!state.isBlinking && now >= state.nextBlinkMs) {
+        state.isBlinking = true;
+        state.blinkStartMs = now;
+        state.blinkPhase = 1;  // inizia a chiudere
+      }
       
-      if (elapsed < 60) {
-        // Chiudendo
-        float t = elapsed / 60.0f;
-        state.leftEyeOpenness = 1.0f - t;
-        state.rightEyeOpenness = 1.0f - t;
-      } else if (elapsed < 120) {
-        // Chiuso
-        state.leftEyeOpenness = 0.05f;
-        state.rightEyeOpenness = 0.05f;
-      } else if (elapsed < 200) {
-        // Aprendo
-        float t = (elapsed - 120) / 80.0f;
-        state.leftEyeOpenness = t;
-        state.rightEyeOpenness = t;
-      } else {
-        // Fine blink
-        state.leftEyeOpenness = 1.0f;
-        state.rightEyeOpenness = 1.0f;
-        state.isBlinking = false;
-        // Prossimo blink: 2-6 secondi (a volte doppio blink)
-        state.nextBlinkMs = now + random(2000, 6000);
+      if (state.isBlinking) {
+        uint32_t elapsed = now - state.blinkStartMs;
+        
+        if (elapsed < 60) {
+          // Chiudendo
+          float t = elapsed / 60.0f;
+          state.leftEyeOpenness = 1.0f - t;
+          state.rightEyeOpenness = 1.0f - t;
+        } else if (elapsed < 120) {
+          // Chiuso
+          state.leftEyeOpenness = 0.05f;
+          state.rightEyeOpenness = 0.05f;
+        } else if (elapsed < 200) {
+          // Aprendo
+          float t = (elapsed - 120) / 80.0f;
+          state.leftEyeOpenness = t;
+          state.rightEyeOpenness = t;
+        } else {
+          // Fine blink
+          state.leftEyeOpenness = 1.0f;
+          state.rightEyeOpenness = 1.0f;
+          state.isBlinking = false;
+          state.nextBlinkMs = now + random(2000, 6000);
+        }
       }
     }
     
-    // ── Sguardo casuale ─────────────────────────────────────────────────
-    if (now >= state.nextLookMs && !state.isBlinking) {
-      int r = random(100);
-      if (r < 40) {
-        state.lookDir = LOOK_CENTER;
-      } else if (r < 55) {
-        state.lookDir = LOOK_LEFT;
-      } else if (r < 70) {
-        state.lookDir = LOOK_RIGHT;
-      } else if (r < 85) {
-        state.lookDir = LOOK_UP;
-      } else {
-        state.lookDir = LOOK_DOWN;
+    // ── Sguardo casuale (disabilitato durante EXP_LOVE) ─────────────────
+    if (state.expression != EXP_LOVE) {
+      if (now >= state.nextLookMs && !state.isBlinking) {
+        int r = random(100);
+        if (r < 40) {
+          state.lookDir = LOOK_CENTER;
+        } else if (r < 55) {
+          state.lookDir = LOOK_LEFT;
+        } else if (r < 70) {
+          state.lookDir = LOOK_RIGHT;
+        } else if (r < 85) {
+          state.lookDir = LOOK_UP;
+        } else {
+          state.lookDir = LOOK_DOWN;
+        }
+        state.nextLookMs = now + random(2000, 7000);
       }
-      state.nextLookMs = now + random(2000, 7000);
+      
+      // ── Smooth pupil movement ───────────────────────────────────────────
+      float targetX = 0, targetY = 0;
+      switch (state.lookDir) {
+        case LOOK_LEFT:   targetX = -1.0f; break;
+        case LOOK_RIGHT:  targetX =  1.0f; break;
+        case LOOK_UP:     targetY = -1.0f; break;
+        case LOOK_DOWN:   targetY =  1.0f; break;
+        default: break;
+      }
+      state.pupilOffsetX += (targetX - state.pupilOffsetX) * 0.15f;
+      state.pupilOffsetY += (targetY - state.pupilOffsetY) * 0.15f;
     }
-    
-    // ── Smooth pupil movement ───────────────────────────────────────────
-    float targetX = 0, targetY = 0;
-    switch (state.lookDir) {
-      case LOOK_LEFT:   targetX = -1.0f; break;
-      case LOOK_RIGHT:  targetX =  1.0f; break;
-      case LOOK_UP:     targetY = -1.0f; break;
-      case LOOK_DOWN:   targetY =  1.0f; break;
-      default: break;
-    }
-    // Lerp per movimento fluido
-    state.pupilOffsetX += (targetX - state.pupilOffsetX) * 0.15f;
-    state.pupilOffsetY += (targetY - state.pupilOffsetY) * 0.15f;
     
     // ── Transizione espressione ─────────────────────────────────────────
     if (state.inTransition) {
@@ -315,7 +317,7 @@ private:
     updateExpressionParams();
   }
 
-// ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   // PARAMETRI ESPRESSIONE
   // ══════════════════════════════════════════════════════════════════════════
   
@@ -329,7 +331,6 @@ private:
     
     switch (exp) {
       case EXP_NEUTRAL:
-        // Defaults già ok
         break;
         
       case EXP_HAPPY:
@@ -342,7 +343,7 @@ private:
       case EXP_SAD:
         tLeftOpen = 0.6f;
         tRightOpen = 0.6f;
-        tLeftBrowAngle = 15.0f;    // sopracciglia inclinate verso centro-alto
+        tLeftBrowAngle = 15.0f;
         tRightBrowAngle = -15.0f;
         tLeftBrowH = 3.0f;
         tRightBrowH = 3.0f;
@@ -351,14 +352,14 @@ private:
       case EXP_ANGRY:
         tLeftOpen = 0.7f;
         tRightOpen = 0.7f;
-        tLeftBrowAngle = -20.0f;   // sopracciglia inclinate verso centro-basso
+        tLeftBrowAngle = -20.0f;
         tRightBrowAngle = 20.0f;
         tLeftBrowH = -1.0f;
         tRightBrowH = -1.0f;
         break;
         
       case EXP_SURPRISED:
-        tLeftOpen = 1.3f;   // occhi più grandi del normale
+        tLeftOpen = 1.3f;
         tRightOpen = 1.3f;
         tLeftBrowH = -5.0f;
         tRightBrowH = -5.0f;
@@ -377,18 +378,17 @@ private:
         tLeftBrowAngle = 10.0f;
         tRightBrowAngle = -5.0f;
         tRightBrowH = -3.0f;
-        // Sguardo in alto a destra
         state.pupilOffsetX = 0.6f;
         state.pupilOffsetY = -0.5f;
         break;
         
       case EXP_LOVE:
-        tLeftOpen = 0.9f;
-        tRightOpen = 0.9f;
+        tLeftOpen = 1.0f;
+        tRightOpen = 1.0f;
         break;
         
       case EXP_WINK:
-        tLeftOpen = 0.05f;   // occhio sinistro chiuso
+        tLeftOpen = 0.05f;
         tRightOpen = 1.0f;
         tRightBrowH = -2.0f;
         break;
@@ -450,6 +450,21 @@ private:
     const int16_t eyeRadiusY = 20;
     const int16_t pupilRadius = 5;
     
+    EyeExpression exp = state.expression;
+    
+    // ── EXP_LOVE: disegna cuori pulsanti al posto degli occhi ───────────
+    if (exp == EXP_LOVE) {
+      // Calcola scala pulsante (sinusoide lenta: periodo ~1.5 secondi)
+      float pulse = sin((float)millis() / 750.0f * PI);  // va da -1 a +1
+      float scale = 1.0f + pulse * 0.2f;  // scala da 0.8 a 1.2
+      
+      drawHeartPulsing(leftEyeCX, eyeCY, scale);
+      drawHeartPulsing(rightEyeCX, eyeCY, scale);
+      drawHappyMouth();
+      return;  // Non disegnare gli occhi normali
+    }
+    
+    // ── Occhi normali per tutte le altre espressioni ────────────────────
     // Disegna occhio sinistro
     drawSingleEye(leftEyeCX, eyeCY, eyeRadiusX, eyeRadiusY, pupilRadius,
                   state.leftEyeOpenness, state.leftBrowAngle, state.leftBrowHeight,
@@ -461,19 +476,125 @@ private:
                   false);
     
     // Decorazioni speciali per alcune espressioni
-    EyeExpression exp = state.expression;
-    
     if (exp == EXP_HAPPY) {
       drawHappyMouth();
     } else if (exp == EXP_SAD) {
       drawSadMouth();
-    } else if (exp == EXP_LOVE) {
-      drawHeartEyes(leftEyeCX, eyeCY);
-      drawHeartEyes(rightEyeCX, eyeCY);
     } else if (exp == EXP_EXCITED) {
       drawSparkles();
     } else if (exp == EXP_CONFUSED) {
       drawQuestionMark();
+    }
+  }
+  
+  // ══════════════════════════════════════════════════════════════════════════
+  // CUORE PULSANTE (per EXP_LOVE)
+  // Disegna un cuore grande con perimetro bianco e interno nero, scalato
+  // ══════════════════════════════════════════════════════════════════════════
+  
+  void drawHeartPulsing(int16_t cx, int16_t cy, float scale) {
+    // Cuore parametrico: usiamo la formula del cuore
+    // x(t) = 16 * sin^3(t)
+    // y(t) = -(13*cos(t) - 5*cos(2t) - 2*cos(3t) - cos(4t))
+    // Scalato per stare in ~18px di raggio base
+    
+    const float baseScale = 1.1f;  // scala base per riempire lo spazio occhio
+    float s = baseScale * scale;
+    
+    // Prima: riempi il cuore di nero (interno)
+    // Poi: disegna il perimetro bianco
+    
+    // ── Passo 1: Trova i punti del perimetro del cuore ──────────────────
+    // Usiamo 60 punti per un contorno liscio
+    const int NUM_POINTS = 60;
+    int16_t px[NUM_POINTS], py[NUM_POINTS];
+    
+    for (int i = 0; i < NUM_POINTS; i++) {
+      float t = (float)i / (float)NUM_POINTS * 2.0f * PI;
+      float sinT = sin(t);
+      float cosT = cos(t);
+      
+      float hx = 16.0f * sinT * sinT * sinT;
+      float hy = -(13.0f * cosT - 5.0f * cos(2.0f * t) - 2.0f * cos(3.0f * t) - cos(4.0f * t));
+      
+      px[i] = cx + (int16_t)(hx * s);
+      py[i] = cy + (int16_t)(hy * s);
+    }
+    
+    // ── Passo 2: Riempi l'interno del cuore (nero) ──────────────────────
+    // Scanline fill: per ogni riga Y, trova min e max X del cuore
+    int16_t minY = py[0], maxY = py[0];
+    for (int i = 1; i < NUM_POINTS; i++) {
+      if (py[i] < minY) minY = py[i];
+      if (py[i] > maxY) maxY = py[i];
+    }
+    
+    // Clamp ai limiti dello schermo
+    if (minY < 0) minY = 0;
+    if (maxY >= SCREEN_HEIGHT) maxY = SCREEN_HEIGHT - 1;
+    
+    for (int16_t row = minY; row <= maxY; row++) {
+      int16_t minX = SCREEN_WIDTH;
+      int16_t maxX = 0;
+      
+      // Trova intersezioni del contorno con questa riga
+      for (int i = 0; i < NUM_POINTS; i++) {
+        int next = (i + 1) % NUM_POINTS;
+        int16_t y1 = py[i], y2 = py[next];
+        int16_t x1 = px[i], x2 = px[next];
+        
+        // Controlla se il segmento attraversa questa riga
+        if ((y1 <= row && y2 >= row) || (y2 <= row && y1 >= row)) {
+          if (y1 == y2) {
+            // Segmento orizzontale
+            if (x1 < minX) minX = x1;
+            if (x1 > maxX) maxX = x1;
+            if (x2 < minX) minX = x2;
+            if (x2 > maxX) maxX = x2;
+          } else {
+            // Interpolazione lineare
+            int16_t xIntersect = x1 + (int16_t)((float)(row - y1) * (float)(x2 - x1) / (float)(y2 - y1));
+            if (xIntersect < minX) minX = xIntersect;
+            if (xIntersect > maxX) maxX = xIntersect;
+          }
+        }
+      }
+      
+      // Riempi la riga con nero (interno del cuore)
+      if (minX < maxX) {
+        oled.drawFastHLine(minX, row, maxX - minX + 1, SSD1306_BLACK);
+      }
+    }
+    
+    // ── Passo 3: Disegna il perimetro bianco (spesso 2px) ───────────────
+    for (int i = 0; i < NUM_POINTS; i++) {
+      int next = (i + 1) % NUM_POINTS;
+      oled.drawLine(px[i], py[i], px[next], py[next], SSD1306_WHITE);
+    }
+    
+    // Secondo passaggio leggermente interno per spessore
+    for (int i = 0; i < NUM_POINTS; i++) {
+      float t = (float)i / (float)NUM_POINTS * 2.0f * PI;
+      float sinT = sin(t);
+      float cosT = cos(t);
+      
+      float hx = 16.0f * sinT * sinT * sinT;
+      float hy = -(13.0f * cosT - 5.0f * cos(2.0f * t) - 2.0f * cos(3.0f * t) - cos(4.0f * t));
+      
+      float innerScale = s * 0.92f;
+      int16_t ix = cx + (int16_t)(hx * innerScale);
+      int16_t iy = cy + (int16_t)(hy * innerScale);
+      
+      int next = (i + 1) % NUM_POINTS;
+      float t2 = (float)next / (float)NUM_POINTS * 2.0f * PI;
+      float sinT2 = sin(t2);
+      float cosT2 = cos(t2);
+      float hx2 = 16.0f * sinT2 * sinT2 * sinT2;
+      float hy2 = -(13.0f * cosT2 - 5.0f * cos(2.0f * t2) - 2.0f * cos(3.0f * t2) - cos(4.0f * t2));
+      int16_t ix2 = cx + (int16_t)(hx2 * innerScale);
+      int16_t iy2 = cy + (int16_t)(hy2 * innerScale);
+      
+      oled.drawLine(ix, iy, ix2, iy2, SSD1306_WHITE);
     }
   }
   
@@ -491,12 +612,10 @@ private:
     }
     
     // ── Contorno occhio (ellisse) ─────────────────────────────────────────
-    // Disegna ellisse piena bianca, poi riempi interno nero, poi pupilla
-    
     // Bordo esterno bianco
     drawEllipse(cx, cy, rx, actualRY, true);
-    
-    // Interno nero (2px più piccolo)
+	
+	// Interno nero (2px più piccolo)
     if (rx > 3 && actualRY > 3) {
       drawEllipseFilled(cx, cy, rx - 2, actualRY - 2, SSD1306_BLACK);
     }
@@ -543,7 +662,6 @@ private:
   
   // ── Helper: Ellisse contorno ────────────────────────────────────────────
   void drawEllipse(int16_t cx, int16_t cy, int16_t rx, int16_t ry, bool white) {
-    // Algoritmo Bresenham per ellisse
     int16_t x = 0, y = ry;
     int32_t rx2 = (int32_t)rx * rx;
     int32_t ry2 = (int32_t)ry * ry;
@@ -595,7 +713,6 @@ private:
   void drawEllipseFilled(int16_t cx, int16_t cy, int16_t rx, int16_t ry, 
                           uint16_t color) {
     for (int16_t y = -ry; y <= ry; y++) {
-      // Calcola x per questa riga dell'ellisse
       float xf = rx * sqrt(1.0f - (float)(y * y) / (float)(ry * ry));
       int16_t xi = (int16_t)xf;
       oled.drawFastHLine(cx - xi, cy + y, xi * 2 + 1, color);
@@ -607,10 +724,8 @@ private:
   // ══════════════════════════════════════════════════════════════════════════
   
   void drawSadMouth() {
-    // Bocca triste: arco invertito
     int16_t mouthCX = 64;
     int16_t mouthCY = 54;
-    // Arco con segmenti
     for (int16_t x = -12; x <= 12; x++) {
       float normalized = (float)x / 12.0f;
       int16_t y = (int16_t)(4.0f * normalized * normalized);
@@ -620,7 +735,6 @@ private:
   }
   
   void drawHappyMouth() {    
-    // Sorriso: arco in basso al centro
     int16_t mouthCX = 64;
     int16_t mouthCY = 58;
     for (int16_t x = -10; x <= 10; x++) {
@@ -631,47 +745,18 @@ private:
     }
   }
   
-  void drawHeartEyes(int16_t cx, int16_t cy) {
-    // Cuoricino piccolo 9x8 pixel al posto della pupilla
-    // Bitmap cuore
-    static const uint8_t heart[] = {
-      0b01101100,
-      0b11111110,
-      0b11111110,
-      0b11111110,
-      0b01111100,
-      0b00111000,
-      0b00010000,
-      0b00000000
-    };
-    
-    int16_t startX = cx - 4;
-    int16_t startY = cy - 4;
-    
-    for (int row = 0; row < 7; row++) {
-      for (int col = 0; col < 8; col++) {
-        if (heart[row] & (0x80 >> col)) {
-          oled.drawPixel(startX + col, startY + row, SSD1306_WHITE);
-        }
-      }
-    }
-  }
-  
   void drawSparkles() {
-    // Stelline attorno agli occhi (per EXP_EXCITED)
-    uint32_t t = millis() / 200;  // cambia ogni 200ms
+    uint32_t t = millis() / 200;
     
-    // 4 stelline in posizioni che ruotano
     const int16_t sparklePos[][2] = {
       {10, 10}, {118, 10}, {15, 55}, {113, 55},
       {50, 5},  {78, 5},   {50, 60}, {78, 60}
     };
     
     for (int i = 0; i < 8; i++) {
-      if ((t + i) % 3 == 0) {  // solo alcune visibili per volta
+      if ((t + i) % 3 == 0) {
         int16_t sx = sparklePos[i][0];
         int16_t sy = sparklePos[i][1];
-        // Stellina: croce 3px
         oled.drawPixel(sx, sy, SSD1306_WHITE);
         oled.drawPixel(sx - 1, sy, SSD1306_WHITE);
         oled.drawPixel(sx + 1, sy, SSD1306_WHITE);
@@ -682,7 +767,6 @@ private:
   }
   
   void drawQuestionMark() {
-    // Punto interrogativo sopra l'occhio destro (per EXP_CONFUSED)
     oled.setTextSize(1);
     oled.setCursor(108, 2);
     oled.print("?");
@@ -699,7 +783,6 @@ private:
     int16_t lineHeight = 8 * state.textSize;
     int16_t startY = 2;
     
-    // Centra verticalmente se poche righe
     int numLines = 0;
     if (strlen(state.textLine1) > 0) numLines++;
     if (strlen(state.textLine2) > 0) numLines++;
@@ -718,7 +801,6 @@ private:
     
     for (int i = 0; i < 4; i++) {
       if (strlen(lines[i]) > 0) {
-        // Centra orizzontalmente
         int16_t textWidth = strlen(lines[i]) * 6 * state.textSize;
         int16_t x = (SCREEN_WIDTH - textWidth) / 2;
         if (x < 0) x = 0;
@@ -735,7 +817,6 @@ private:
   // ══════════════════════════════════════════════════════════════════════════
   
   void drawProgress() {
-    // Label in alto
     if (strlen(state.progressLabel) > 0) {
       oled.setTextSize(1);
       int16_t tw = strlen(state.progressLabel) * 6;
@@ -743,22 +824,18 @@ private:
       oled.print(state.progressLabel);
     }
     
-    // Barra di progresso
     int16_t barX = 10;
     int16_t barY = 28;
     int16_t barW = SCREEN_WIDTH - 20;
     int16_t barH = 14;
     
-    // Contorno
     oled.drawRect(barX, barY, barW, barH, SSD1306_WHITE);
     
-    // Riempimento
     int16_t fillW = (int16_t)((barW - 4) * state.progressPercent / 100.0f);
     if (fillW > 0) {
       oled.fillRect(barX + 2, barY + 2, fillW, barH - 4, SSD1306_WHITE);
     }
     
-    // Percentuale sotto
     char pctStr[8];
     snprintf(pctStr, sizeof(pctStr), "%d%%", state.progressPercent);
     oled.setTextSize(1);
@@ -772,10 +849,8 @@ private:
   // ══════════════════════════════════════════════════════════════════════════
   
   void drawIcon() {
-    // Icona a sinistra (32x32), testo a destra
     drawBuiltinIcon(4, 16, state.iconId);
     
-    // Testo a destra dell'icona
     oled.setTextSize(1);
     oled.setTextWrap(true);
     oled.setCursor(40, 20);
@@ -865,8 +940,3 @@ private:
 };
 
 #endif // DISPLAY_EYES_H
-
-
-
-
-
