@@ -463,6 +463,30 @@ private:
       drawHappyMouth();
       return;  // Non disegnare gli occhi normali
     }
+
+    // ── EXP_EXCITED: disegna stelline rotanti al posto delle pupille ────
+    if (exp == EXP_EXCITED) {
+      const int16_t leftEyeCX  = 32;
+      const int16_t rightEyeCX = 96;
+      
+      // Disegna occhio sinistro (senza pupilla)
+      drawSingleEyeNoPupil(leftEyeCX, eyeCY, eyeRadiusX, eyeRadiusY,
+                    state.leftEyeOpenness, state.leftBrowAngle, state.leftBrowHeight, true);
+      
+      // Disegna occhio destro (senza pupilla)
+      drawSingleEyeNoPupil(rightEyeCX, eyeCY, eyeRadiusX, eyeRadiusY,
+                    state.rightEyeOpenness, state.rightBrowAngle, state.rightBrowHeight, false);
+      
+      // Stelline rotanti al centro degli occhi
+      float angle = (float)millis() / 500.0f;  // rotazione continua
+      drawStar5(leftEyeCX + (int16_t)(state.pupilOffsetX * 8),
+                eyeCY + (int16_t)(state.pupilOffsetY * 8), 7, angle);
+      drawStar5(rightEyeCX + (int16_t)(state.pupilOffsetX * 8),
+                eyeCY + (int16_t)(state.pupilOffsetY * 8), 7, angle);
+      
+      drawSparkles();
+      return;
+    }
     
     // ── Occhi normali per tutte le altre espressioni ────────────────────
     // Disegna occhio sinistro
@@ -480,12 +504,105 @@ private:
       drawHappyMouth();
     } else if (exp == EXP_SAD) {
       drawSadMouth();
-    } else if (exp == EXP_EXCITED) {
-      drawSparkles();
     } else if (exp == EXP_CONFUSED) {
       drawQuestionMark();
     }
   }
+
+
+    // ── Disegna occhio SENZA pupilla (per EXP_EXCITED) ────────────────────
+  void drawSingleEyeNoPupil(int16_t cx, int16_t cy, int16_t rx, int16_t ry,
+                      float openness, float browAngle,
+                      float browHeight, bool isLeft) {
+    
+    int16_t actualRY = (int16_t)(ry * constrain(openness, 0.05f, 1.5f));
+    
+    if (openness < 0.1f) {
+      oled.drawFastHLine(cx - rx, cy, rx * 2, SSD1306_WHITE);
+      return;
+    }
+    
+    // Contorno occhio
+    drawEllipse(cx, cy, rx, actualRY, true);
+    if (rx > 3 && actualRY > 3) {
+      drawEllipseFilled(cx, cy, rx - 2, actualRY - 2, SSD1306_BLACK);
+    }
+    
+    // Sopracciglio
+    int16_t browY = cy - actualRY - 4 + (int16_t)browHeight;
+    int16_t browLen = rx + 4;
+    float angleRad = browAngle * PI / 180.0f;
+    int16_t dx = (int16_t)(browLen * cos(angleRad));
+    int16_t dy = (int16_t)(browLen * sin(angleRad));
+    int16_t browStartX = cx - dx / 2;
+    int16_t browStartY = browY - dy / 2;
+    int16_t browEndX   = cx + dx / 2;
+    int16_t browEndY   = browY + dy / 2;
+    oled.drawLine(browStartX, browStartY, browEndX, browEndY, SSD1306_WHITE);
+    oled.drawLine(browStartX, browStartY - 1, browEndX, browEndY - 1, SSD1306_WHITE);
+    
+    // Palpebra
+    if (openness < 0.8f && openness >= 0.1f) {
+      int16_t lidHeight = (int16_t)((1.0f - openness) * actualRY * 0.8f);
+      oled.fillRect(cx - rx - 1, cy - actualRY - 1, rx * 2 + 2, lidHeight, SSD1306_BLACK);
+    }
+  }
+  
+  // ── Disegna stella a 5 punte ruotata ──────────────────────────────────
+  void drawStar5(int16_t cx, int16_t cy, int16_t radius, float rotAngle) {
+    // 5 punte esterne + 5 punte interne (raggio interno = 40% esterno)
+    const int NUM_VERTICES = 10;
+    int16_t px[NUM_VERTICES], py[NUM_VERTICES];
+    float innerRadius = radius * 0.4f;
+    
+    for (int i = 0; i < NUM_VERTICES; i++) {
+      float a = rotAngle + (float)i * PI / 5.0f - PI / 2.0f;
+      float r = (i % 2 == 0) ? (float)radius : innerRadius;
+      px[i] = cx + (int16_t)(r * cos(a));
+      py[i] = cy + (int16_t)(r * sin(a));
+    }
+    
+    // Disegna il contorno della stella
+    for (int i = 0; i < NUM_VERTICES; i++) {
+      int next = (i + 1) % NUM_VERTICES;
+      oled.drawLine(px[i], py[i], px[next], py[next], SSD1306_WHITE);
+    }
+    
+    // Riempi la stella (scanline)
+    int16_t minY = py[0], maxY = py[0];
+    for (int i = 1; i < NUM_VERTICES; i++) {
+      if (py[i] < minY) minY = py[i];
+      if (py[i] > maxY) maxY = py[i];
+    }
+    if (minY < 0) minY = 0;
+    if (maxY >= SCREEN_HEIGHT) maxY = SCREEN_HEIGHT - 1;
+    
+    for (int16_t row = minY; row <= maxY; row++) {
+      int16_t minX = SCREEN_WIDTH, maxX = 0;
+      for (int i = 0; i < NUM_VERTICES; i++) {
+        int next = (i + 1) % NUM_VERTICES;
+        int16_t y1 = py[i], y2 = py[next];
+        int16_t x1 = px[i], x2 = px[next];
+        if ((y1 <= row && y2 >= row) || (y2 <= row && y1 >= row)) {
+          if (y1 != y2) {
+            int16_t xInt = x1 + (int16_t)((float)(row - y1) * (float)(x2 - x1) / (float)(y2 - y1));
+            if (xInt < minX) minX = xInt;
+            if (xInt > maxX) maxX = xInt;
+          } else {
+            if (x1 < minX) minX = x1;
+            if (x1 > maxX) maxX = x1;
+            if (x2 < minX) minX = x2;
+            if (x2 > maxX) maxX = x2;
+          }
+        }
+      }
+      if (minX <= maxX) {
+        oled.drawFastHLine(minX, row, maxX - minX + 1, SSD1306_WHITE);
+      }
+    }
+  }
+
+
   
   // ══════════════════════════════════════════════════════════════════════════
   // CUORE PULSANTE (per EXP_LOVE)
