@@ -288,7 +288,7 @@ async def synthesize_and_send(text: str, emotion: str = "happy"):
         if result.returncode != 0:
             log.error("[TTS] Piper stderr: %s", result.stderr.decode(errors='replace'))
             return b""
-        return result.stdout
+        # return result.stdout
         
         
         
