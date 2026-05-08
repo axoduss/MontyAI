@@ -90,9 +90,9 @@ volatile uint32_t micEnableAfterMs = 10;  // millis() dopo cui il mic può ascol
 #define POST_TTS_COOLDOWN_MS  2000        // ms di silenzio forzato dopo TTS (regolabile)
 
 
-// Indirizzi I2C di default (potrebbero variare in base al modulo)
+// Indirizzi I2C di default 
 #define MPU6500_ADDR 0x68
-#define BMP280_ADDR  0x76 // Alcuni moduli usano 0x77
+#define BMP280_ADDR  0x76 
 
 
 // ─── OGGETTI GLOBALI ─────────────────────────────────────────────────────────
@@ -222,8 +222,6 @@ void setupSensors();
 void setupMotors();
 void setupBumpers();
 
-
-
 void taskSensors(void* param);
 void taskMic(void* param);
 void taskSpeaker(void* param);
@@ -252,8 +250,6 @@ void wsAudioEvent(WStype_t type, uint8_t* payload, size_t length);
 void wsCmdEvent(WStype_t type, uint8_t* payload, size_t length);
 
 EyeExpression parseExpression(const char* str);
-
-
 
 
 

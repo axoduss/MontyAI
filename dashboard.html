@@ -499,7 +499,91 @@
     font-size: 11px;
   }
   
-  
+  /* ─── SENSORI ────────────────────────────────── */
+  .sensor-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+  }
+  .sensor-row span:first-child { width: 14px; text-align: center; }
+  .sensor-val {
+        font-size: 11px;
+    color: var(--text);
+    min-width: 45px;
+    text-align: right;
+  }
+  .sensor-bar-wrap {
+    flex: 1;
+    height: 4px;
+    background: var(--bg);
+    border-radius: 2px;
+    overflow: hidden;
+    min-width: 30px;
+  }
+  .sensor-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 50%;
+    transition: width 0.15s, background 0.15s;
+  }
+  .sensor-bar.gyro-bar {
+    background: #a78bfa;
+  }
+  .sensor-bar.danger {
+    background: var(--accent2);
+  }
+  .sensor-event-ind {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: all 0.2s;
+    letter-spacing: 1px;
+  }
+  .sensor-event-ind.active {
+    color: var(--accent2);
+    border-color: var(--accent2);
+    background: rgba(255,61,113,0.1);
+    box-shadow: 0 0 8px rgba(255,61,113,0.3);
+    animation: pulse-dot 0.5s infinite;
+  }
+  .sensor-event-ind.tap-flash {
+    color: #ff9f43;
+    border-color: #ff9f43;
+    background: rgba(255,159,67,0.15);
+    box-shadow: 0 0 10px rgba(255,159,67,0.4);
+  }
+
+  /* Robot tilt animation */
+  .robot-container.tilted {
+    transition: transform 0.3s ease;
+  }
+  .robot-container.shake {
+    animation: robot-shake 0.4s ease-out;
+  }
+  @keyframes robot-shake {
+    0%   { transform: translateX(0) rotate(0); }
+    20%  { transform: translateX(-6px) rotate(-2deg); }
+    40%  { transform: translateX(5px) rotate(1.5deg); }
+    60%  { transform: translateX(-3px) rotate(-1deg); }
+    80%  { transform: translateX(2px) rotate(0.5deg); }
+    100% { transform: translateX(0) rotate(0); }
+  }
+  @keyframes robot-freefall {
+    0%   { transform: translateY(0); opacity: 1; }
+    50%  { transform: translateY(20px); opacity: 0.5; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+  .robot-container.freefall {
+    animation: robot-freefall 0.6s ease-in-out;
+  }
   
   
 
@@ -639,6 +723,52 @@
         <div class="vu-bar" style="height:4px"></div>
       </div>
     </div>
+	
+	
+	    <!-- Sensori IMU -->
+    <div style="width:100%;max-width:400px;">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);text-align:center;margin-bottom:8px;letter-spacing:2px;">IMU + ENV SENSORS</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <!-- Accelerometro -->
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:2px;margin-bottom:6px;">ACCEL (g)</div>
+          <div class="sensor-row"><span>X</span><span id="sens-ax" class="sensor-val">0.00</span><div class="sensor-bar-wrap"><div class="sensor-bar" id="bar-ax"></div></div></div>
+          <div class="sensor-row"><span>Y</span><span id="sens-ay" class="sensor-val">0.00</span><div class="sensor-bar-wrap"><div class="sensor-bar" id="bar-ay"></div></div></div>
+          <div class="sensor-row"><span>Z</span><span id="sens-az" class="sensor-val">0.00</span><div class="sensor-bar-wrap"><div class="sensor-bar" id="bar-az"></div></div></div>
+          <div class="sensor-row" style="margin-top:4px;border-top:1px solid var(--border);padding-top:4px;"><span>|A|</span><span id="sens-amag" class="sensor-val" style="color:var(--accent);">1.00</span></div>
+        </div>
+        <!-- Giroscopio -->
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:2px;margin-bottom:6px;">GYRO (°/s)</div>
+          <div class="sensor-row"><span>X</span><span id="sens-gx" class="sensor-val">0.0</span><div class="sensor-bar-wrap"><div class="sensor-bar gyro-bar" id="bar-gx"></div></div></div>
+          <div class="sensor-row"><span>Y</span><span id="sens-gy" class="sensor-val">0.0</span><div class="sensor-bar-wrap"><div class="sensor-bar gyro-bar" id="bar-gy"></div></div></div>
+          <div class="sensor-row"><span>Z</span><span id="sens-gz" class="sensor-val">0.0</span><div class="sensor-bar-wrap"><div class="sensor-bar gyro-bar" id="bar-gz"></div></div></div>
+        </div>
+        <!-- Inclinazione -->
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:2px;margin-bottom:6px;">TILT (°)</div>
+          <div class="sensor-row"><span>X</span><span id="sens-tx" class="sensor-val">0.0°</span></div>
+          <div class="sensor-row"><span>Y</span><span id="sens-ty" class="sensor-val">0.0°</span></div>
+          <div id="tilt-alert" style="display:none;font-family:var(--mono);font-size:10px;color:var(--accent2);margin-top:6px;text-align:center;animation:blink-badge .5s steps(1) infinite;">⚠ TILT ALERT</div>
+        </div>
+        <!-- Ambiente -->
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:2px;margin-bottom:6px;">ENVIRONMENT</div>
+          <div class="sensor-row"><span>🌡️</span><span id="sens-temp" class="sensor-val">--°C</span></div>
+          <div class="sensor-row"><span>🔽</span><span id="sens-press" class="sensor-val">-- hPa</span></div>
+          <div id="freefall-alert" style="display:none;font-family:var(--mono);font-size:10px;color:var(--accent2);margin-top:6px;text-align:center;animation:blink-badge .3s steps(1) infinite;">🆘 FREEFALL!</div>
+        </div>
+      </div>
+      <!-- Indicatori eventi -->
+      <div style="display:flex;justify-content:center;gap:16px;margin-top:8px;">
+        <div class="sensor-event-ind" id="evt-tap">🤜 TAP</div>
+        <div class="sensor-event-ind" id="evt-tilt">📐 TILT</div>
+        <div class="sensor-event-ind" id="evt-fall">🆘 FALL</div>
+      </div>
+    </div>
+	
+	
+	
   </div>
 
   <!-- ── RIGHT: COMANDI ─────────────────────────────── -->
@@ -950,6 +1080,26 @@ function handleMessage(data) {
   if (type === 'motor_timeout') {
     log('motor_timeout', 'Motori fermati (timeout)');
   }
+  
+  // ── Eventi sensori ──
+  if (type === 'sensor_data') {
+    updateSensorDisplay(data);
+    return; // non loggare (troppo frequente)
+  }
+  if (type === 'tap_detected') {
+    handleTapEvent(data);
+  }
+  if (type === 'tilt_alert') {
+    handleTiltAlert(data);
+  }
+  if (type === 'tilt_recovered') {
+    handleTiltRecovered();
+  }
+  if (type === 'freefall_detected') {
+    handleFreefallEvent();
+  }
+  
+  
 
   // ACK motori
   if (type === 'esp32_ack') {
@@ -961,7 +1111,7 @@ function handleMessage(data) {
 
 
   // Log tutto tranne noise
-  const noisy = new Set(['audio_chunk']);
+  const noisy = new Set(['audio_chunk', 'sensor_data']);
   if (!noisy.has(type)) {
     const body = type === 'stt_result' ? data.text :
                  type === 'command_sent' ? `${data.cmd} ${JSON.stringify(data.params)}` :
@@ -1031,6 +1181,150 @@ function handleBumperHit(side) {
     dot.classList.remove('hit');
   }, 2000);
 }
+
+
+// ─── SENSORI ──────────────────────────────────────────
+let lastSensorData = null;
+let tiltAlertActive = false;
+let freefallActive = false;
+
+function updateSensorDisplay(data) {
+  lastSensorData = data;
+
+  const accel = data.accel || {};
+  const gyro = data.gyro || {};
+  const tilt = data.tilt || {};
+  const state = data.state || {};
+
+  // Accelerometro
+  setEl('sens-ax', (accel.x || 0).toFixed(2));
+  setEl('sens-ay', (accel.y || 0).toFixed(2));
+  setEl('sens-az', (accel.z || 0).toFixed(2));
+  setEl('sens-amag', (accel.mag || 1).toFixed(2));
+
+  // Barre accelerometro (range ±4g, normalizzato a 0-100%)
+  setSensorBar('bar-ax', accel.x, 4);
+  setSensorBar('bar-ay', accel.y, 4);
+  setSensorBar('bar-az', accel.z, 4);
+
+  // Giroscopio
+  setEl('sens-gx', (gyro.x || 0).toFixed(1));
+  setEl('sens-gy', (gyro.y || 0).toFixed(1));
+  setEl('sens-gz', (gyro.z || 0).toFixed(1));
+
+  // Barre giroscopio (range ±500°/s)
+  setSensorBar('bar-gx', gyro.x, 500);
+  setSensorBar('bar-gy', gyro.y, 500);
+  setSensorBar('bar-gz', gyro.z, 500);
+
+  // Inclinazione
+  setEl('sens-tx', (tilt.x || 0).toFixed(1) + '°');
+  setEl('sens-ty', (tilt.y || 0).toFixed(1) + '°');
+
+  // Ambiente
+  if (data.temp !== undefined) setEl('sens-temp', data.temp.toFixed(1) + '°C');
+  if (data.press !== undefined) setEl('sens-press', data.press.toFixed(1) + ' hPa');
+
+  // Stato alert
+  const tiltAlert = state.tilt === true || state.tilt === "true";
+  const freefallAlert = state.freefall === true || state.freefall === "true";
+
+  document.getElementById('tilt-alert').style.display = tiltAlert ? 'block' : 'none';
+  document.getElementById('freefall-alert').style.display = freefallAlert ? 'block' : 'none';
+
+  // Animazione robot basata su inclinazione
+  updateRobotTilt(tilt.x || 0, tilt.y || 0);
+}
+
+function setSensorBar(barId, value, maxVal) {
+  const bar = document.getElementById(barId);
+  if (!bar) return;
+  const absVal = Math.abs(value || 0);
+  const pct = Math.min((absVal / maxVal) * 100, 100);
+  bar.style.width = Math.max(pct, 2) + '%';
+
+  // Colore danger se vicino al limite
+  if (pct > 70) {
+    bar.classList.add('danger');
+  } else {
+    bar.classList.remove('danger');
+  }
+}
+
+function setEl(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+// ─── ANIMAZIONE ROBOT BASATA SU TILT ─────────────────
+function updateRobotTilt(tiltX, tiltY) {
+  const container = document.querySelector('.robot-container');
+  if (!container) return;
+
+  // Mappa inclinazione reale → rotazione SVG (attenuata)
+  const maxVisualAngle = 15; // max gradi visuali
+  const clampedX = Math.max(-45, Math.min(45, tiltX));
+  const clampedY = Math.max(-45, Math.min(45, tiltY));
+  const visualRotate = (clampedY / 45) * maxVisualAngle;
+  const visualTiltX = (clampedX / 45) * 5; // leggero shift verticale
+
+  container.style.transform = `rotate(${visualRotate}deg) translateY(${visualTiltX}px)`;
+  container.classList.add('tilted');
+}
+
+// ─── GESTIONE EVENTI SENSORI ──────────────────────────
+function handleTapEvent(data) {
+  const intensity = data.intensity || 0;
+  log('tap_detected', `Intensità: ${intensity.toFixed(2)}g`);
+
+  // Flash indicatore
+  const evt = document.getElementById('evt-tap');
+  evt.classList.add('tap-flash');
+  setTimeout(() => evt.classList.remove('tap-flash'), 1500);
+
+  // Animazione shake sul robot
+  const container = document.querySelector('.robot-container');
+  container.classList.add('shake');
+  setTimeout(() => container.classList.remove('shake'), 500);
+}
+
+function handleTiltAlert(data) {
+  log('tilt_alert', `X=${(data.angle_x||0).toFixed(1)}° Y=${(data.angle_y||0).toFixed(1)}°`);
+  tiltAlertActive = true;
+
+  const evt = document.getElementById('evt-tilt');
+  evt.classList.add('active');
+}
+
+function handleTiltRecovered() {
+  log('tilt_recovered', 'Inclinazione recuperata');
+  tiltAlertActive = false;
+
+  const evt = document.getElementById('evt-tilt');
+  evt.classList.remove('active');
+
+  // Reset rotazione robot
+  const container = document.querySelector('.robot-container');
+  container.style.transform = 'rotate(0deg) translateY(0px)';
+}
+
+function handleFreefallEvent() {
+  log('freefall_detected', '🆘 CADUTA LIBERA!');
+  freefallActive = true;
+
+  const evt = document.getElementById('evt-fall');
+  evt.classList.add('active');
+
+  // Animazione caduta
+  const container = document.querySelector('.robot-container');
+  container.classList.add('freefall');
+  setTimeout(() => {
+    container.classList.remove('freefall');
+    evt.classList.remove('active');
+    freefallActive = false;
+  }, 3000);
+}
+
 
 
 

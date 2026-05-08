@@ -14,6 +14,7 @@ import logging
 import subprocess
 import unicodedata
 import numpy as np
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -103,7 +104,9 @@ class RobotState:
         self.current_state = "idle"
         self.led_color = {"r": 0, "g": 0, "b": 0}
         self.current_emotion = "neutral"          
-        self.display_mode = "eyes"                 
+        self.display_mode = "eyes"         
+        self.last_sensor_data: dict = {}   # ultimo report sensori
+        self.last_sensor_broadcast: float = 0  # timestamp ultimo broadcast sensori        
 
     def log_event(self, event_type: str, data: dict):
         """Notifica tutte le dashboard connesse."""
@@ -1184,6 +1187,81 @@ async def ws_cmd(ws: WebSocket):
                 elif data.get("event") == "motor_timeout":
                     log.info("[MOT] Timeout motore raggiunto.")
                     robot.log_event("motor_timeout", {})
+                    
+                    
+                    
+                # ── Eventi sensori IMU ────────────────────────────────────────
+                elif data.get("event") == "sensor_data":
+                    # Dati periodici — broadcast alla dashboard, no reazione LLM
+                    robot.last_sensor_data = data  # salva per consultazione
+                    now = time.time()
+                    if now - robot.last_sensor_broadcast >= 0.5:
+                        robot.last_sensor_broadcast = now
+                        robot.log_event("sensor_data", {
+                            "temp": data.get("temp"),
+                            "press": data.get("press"),
+                            "accel": data.get("accel"),
+                            "gyro": data.get("gyro"),
+                            "tilt": data.get("tilt"),
+                            "state": data.get("state"),
+                        })
+
+                elif data.get("event") == "tap_detected":
+                    intensity = data.get("intensity", 0)
+                    log.warning("[SENSOR] 🤜 TAP rilevato! Intensità: %.2fg", intensity)
+                    robot.log_event("tap_detected", {"intensity": intensity})
+
+                    # Reazione LLM solo se il robot è IDLE (non interrompere conversazioni)
+                    if robot.current_state == "idle":
+                        # Intensità diversa → reazione diversa
+                        if intensity > 4.0:
+                            prompt = (
+                                f"[EVENTO FISICO] Qualcuno ti ha dato un colpo forte (intensità: {intensity:.1f}g)! "
+                                f"Reagisci in modo sorpreso/spaventato/arrabbiato. Breve, max 1 frase."
+                            )
+                        elif intensity > 3.0:
+                            prompt = (
+                                f"[EVENTO FISICO] Qualcuno ti ha dato un colpetto medio (intensità: {intensity:.1f}g). "
+                                f"Reagisci in modo un po' infastidito ma simpatico. Breve."
+                            )
+                        else:
+                            prompt = (
+                                f"[EVENTO FISICO] Qualcuno ti ha toccato leggermente (intensità: {intensity:.1f}g). "
+                                f"Reagisci in modo curioso o divertito. Breve."
+                            )
+                        asyncio.create_task(safe_run_pipeline_from_text(prompt))
+
+                elif data.get("event") == "tilt_alert":
+                    angle_x = data.get("angle_x", 0)
+                    angle_y = data.get("angle_y", 0)
+                    log.warning("[SENSOR] ⚠️ TILT! X=%.1f° Y=%.1f°", angle_x, angle_y)
+                    robot.log_event("tilt_alert", {"angle_x": angle_x, "angle_y": angle_y})
+
+                    if robot.current_state == "idle":
+                        asyncio.create_task(safe_run_pipeline_from_text(
+                            f"[EVENTO FISICO] Ti stai inclinando troppo! Angolo X={angle_x:.0f}°, Y={angle_y:.0f}°. "
+                            f"Sei preoccupato di cadere. Reagisci con panico/preoccupazione. Max 1 frase breve."
+                        ))
+
+                elif data.get("event") == "tilt_recovered":
+                    log.info("[SENSOR] ✓ Inclinazione recuperata")
+                    robot.log_event("tilt_recovered", {})
+
+                    if robot.current_state == "idle":
+                        asyncio.create_task(safe_run_pipeline_from_text(
+                            "[EVENTO FISICO] Eri inclinato ma ora sei tornato dritto. "
+                            "Esprimi sollievo in modo buffo. Max 1 frase brevissima."
+                        ))
+
+                elif data.get("event") == "freefall_detected":
+                    log.critical("[SENSOR] 🆘 CADUTA LIBERA!")
+                    robot.log_event("freefall_detected", {})
+
+                    if robot.current_state in ("idle", "speaking"):
+                        asyncio.create_task(safe_run_pipeline_from_text(
+                            "[EVENTO CRITICO] Stai cadendo! Caduta libera rilevata! "
+                            "Urla brevemente di paura. Max 3-4 parole."
+                        ))
 
     except WebSocketDisconnect:
         log.info("[WS Cmd] ESP32 disconnesso (WebSocketDisconnect).")
