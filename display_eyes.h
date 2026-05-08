@@ -10,8 +10,8 @@
 #define SCREEN_HEIGHT   64
 #define OLED_RESET      -1
 #define SCREEN_ADDRESS  0x3C
-#define DISPLAY_SDA     GPIO_NUM_17
-#define DISPLAY_SCL     GPIO_NUM_18
+#define I2C_SDA     GPIO_NUM_17
+#define I2C_SCL     GPIO_NUM_18
 
 // ─── DISPLAY MODE ────────────────────────────────────────────────────────────
 enum DisplayMode {
@@ -116,7 +116,7 @@ public:
   bool begin() {
     mutex = xSemaphoreCreateMutex();
     
-    Wire.begin(DISPLAY_SDA, DISPLAY_SCL);
+    Wire.begin(I2C_SDA, I2C_SCL);
     Wire.setClock(400000);  // 400kHz I2C fast mode
     
     if (!oled.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {

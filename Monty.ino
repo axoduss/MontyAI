@@ -1,6 +1,5 @@
 /*
- * ROBOT ESP32-S3 N16R8 - Firmware Base
- * Fase 1: MIC I2S (INMP441), WebSocket, NeoPixel WS2812
+ * ROBOT ESP32-S3 N16R8
  * 
  * Arduino IDE 2.3.8 | ESP32 Core 3.x | FreeRTOS
  * 
@@ -20,6 +19,9 @@
 #include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
 #include "driver/i2s.h"
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP280.h>
+#include <MPU6500_WE.h> 
 
 // ─── CONFIG WIFI ─────────────────────────────────────────────────────────────
 const char* wifi_ssid     = WIFI_SSID;
@@ -88,12 +90,21 @@ volatile uint32_t micEnableAfterMs = 10;  // millis() dopo cui il mic può ascol
 #define POST_TTS_COOLDOWN_MS  2000        // ms di silenzio forzato dopo TTS (regolabile)
 
 
+// Indirizzi I2C di default (potrebbero variare in base al modulo)
+#define MPU6500_ADDR 0x68
+#define BMP280_ADDR  0x76 // Alcuni moduli usano 0x77
+
+
 // ─── OGGETTI GLOBALI ─────────────────────────────────────────────────────────
 WebSocketsClient wsAudio;   // WebSocket per stream audio → server
 WebSocketsClient wsCmd;     // WebSocket per comandi JSON ← server
 
 Adafruit_NeoPixel strip(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 DisplayManager display;
+
+// Per i sensori
+Adafruit_BMP280 bmp;
+MPU6500_WE mpu = MPU6500_WE(MPU6500_ADDR);
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 enum RobotState { IDLE, LISTENING, PROCESSING, SPEAKING, PLAYING_MUSIC };
@@ -165,6 +176,7 @@ TaskHandle_t taskMicHandle    = NULL;
 TaskHandle_t taskSpeakerHandle = NULL;
 TaskHandle_t taskStatusHandle  = NULL;
 TaskHandle_t taskDisplayHandle = NULL;
+TaskHandle_t taskSensorsHandle = NULL;
 
 
 // ─── CODA COMANDI ────────────────────────────────────────────────────────────
@@ -206,26 +218,27 @@ void setupI2S_Mic();
 void setupI2S_Speaker();
 void setupNeoPixel();
 void setupWebSockets();
+void setupSensors();
+void setupMotors();
+void setupBumpers();
+
+
+
+void taskSensors(void* param);
 void taskMic(void* param);
 void taskSpeaker(void* param);
 void taskStatusLed(void* param);
 void taskCommandProcessor(void* param);
-void wsAudioEvent(WStype_t type, uint8_t* payload, size_t length);
-void wsCmdEvent(WStype_t type, uint8_t* payload, size_t length);
-void handleCommand(const char* json);
-void setLedColor(uint8_t r, uint8_t g, uint8_t b);
-void setLedEffect(const char* effect);
-int16_t computeRMS(int16_t* samples, size_t count);
-void flushTtsQueue();
-void taskDisplay(void* param);
-EyeExpression parseExpression(const char* str);
-
-
-
-void setupMotors();
-void setupBumpers();
 void taskMotorWatchdog(void* param);
 void taskBumperMonitor(void* param);
+void taskDisplay(void* param);
+
+void handleCommand(const char* json);
+int16_t computeRMS(int16_t* samples, size_t count);
+void flushTtsQueue();
+
+void setLedColor(uint8_t r, uint8_t g, uint8_t b);
+void setLedEffect(const char* effect);
 void motorSetLeft(int16_t speed);
 void motorSetRight(int16_t speed);
 void motorStop();
@@ -233,6 +246,13 @@ void motorForward(uint8_t speed);
 void motorBackward(uint8_t speed);
 void motorTurnLeft(uint8_t speed);
 void motorTurnRight(uint8_t speed);
+
+
+void wsAudioEvent(WStype_t type, uint8_t* payload, size_t length);
+void wsCmdEvent(WStype_t type, uint8_t* payload, size_t length);
+
+EyeExpression parseExpression(const char* str);
+
 
 
 
@@ -256,6 +276,7 @@ void setup() {
   setupMotors();      
   setupBumpers();     
   setupWebSockets();
+  setupSensors();
 
    // Display OLED
   if (!display.begin()) {
@@ -280,6 +301,7 @@ void setup() {
   xTaskCreatePinnedToCore(taskBumperMonitor, "BumpTask", 4096, NULL, 6, &taskBumperHandle, 0);
   xTaskCreatePinnedToCore(taskCommandProcessor, "CmdTask",  8192, NULL, 7, &taskCmdHandle,      0);
   xTaskCreatePinnedToCore(taskDisplay, "DispTask", 8192, NULL, 2, &taskDisplayHandle, 0);
+  xTaskCreatePinnedToCore(taskSensors, "SensTask", 4096, NULL, 2, &taskSensorsHandle, 0);
 
 
   setLedColor(0, 5, 0); // verde: pronto
@@ -1440,6 +1462,68 @@ void taskBumperMonitor(void* param) {
     lastRight = curRight;
 
     vTaskDelay(pdMS_TO_TICKS(10));  // polling 100Hz
+  }
+}
+
+// ─── SETUP SENSORI I2C ───────────────────────────────────────────────────────
+void setupSensors() {
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Serial.println("[SENS] Inizializzazione I2C...");
+
+  // Inizializza BMP280
+  if (!bmp.begin(BMP280_ADDR)) {
+    Serial.println("[SENS] ERRORE: BMP280 non trovato!");
+  } else {
+    // Configurazione base BMP280
+    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     
+                    Adafruit_BMP280::SAMPLING_X2,     
+                    Adafruit_BMP280::SAMPLING_X16,    
+                    Adafruit_BMP280::FILTER_X16,      
+                    Adafruit_BMP280::STANDBY_MS_500);
+    Serial.println("[SENS] BMP280 pronto.");
+  }
+
+  // Inizializza MPU6500
+  if (!mpu.init()) {
+    Serial.println("[SENS] ERRORE: MPU6500 non trovato!");
+  } else {
+    Serial.println("[SENS] MPU6500 pronto. Calibrazione in corso...");
+    mpu.autoOffsets(); // Calibrazione automatica all'avvio
+    Serial.println("[SENS] Calibrazione MPU6500 completata.");
+  }
+}
+
+// ─── TASK: LETTURA SENSORI ───────────────────────────────────────────────────
+/*
+ * Legge i dati dai sensori I2C ogni secondo e li invia al server
+ * tramite WebSocket in formato JSON.
+ */
+void taskSensors(void* param) {
+  Serial.println("[SENS Task] Avviato.");
+
+  for (;;) {
+    // Leggi solo se il WebSocket dei comandi è connesso per evitare sprechi
+    if (wsCmdConnected) {
+      // Lettura BMP280
+      float temp = bmp.readTemperature();
+      float press = bmp.readPressure() / 100.0F; // Converte in hPa
+
+      // Lettura MPU6500
+      xyzFloat gValue = mpu.getGValues();   // Accelerometro (g)
+      xyzFloat gyr = mpu.getGyrValues();    // Giroscopio (gradi/s)
+
+      // Prepara il payload JSON
+      char payload[256];
+      snprintf(payload, sizeof(payload),
+        "{\"event\":\"sensor_data\",\"temp\":%.2f,\"press\":%.2f,\"accel\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f},\"gyro\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}}",
+        temp, press, gValue.x, gValue.y, gValue.z, gyr.x, gyr.y, gyr.z);
+
+      // Invia al server
+      wsCmd.sendTXT(payload);
+    }
+
+    // Attendi 1 secondo prima della prossima lettura (regola a piacimento)
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
