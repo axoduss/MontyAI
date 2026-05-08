@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import subprocess
+import unicodedata
 import numpy as np
 from datetime import datetime
 from typing import Optional
@@ -278,11 +279,27 @@ async def synthesize_and_send(text: str, emotion: str = "happy"):
     log.info("[TTS] Sintesi: '%s'", text)
 
     def run_piper(t: str) -> bytes:
+        
+        log.info("[TTS] repr del testo: %s", repr(t))
+        log.info("[TTS] hex: %s", t.encode("utf-8").hex())
+        
+        t = unicodedata.normalize("NFC", t)
         model_path = os.path.join(os.path.dirname(__file__), "it_IT-riccardo-x_low.onnx")
+        
+        # Forza l'ambiente UTF-8 per il subprocess
+        env = os.environ.copy()
+        env["LANG"] = "it_IT.UTF-8"
+        env["LC_ALL"] = "it_IT.UTF-8"
+        env["PYTHONIOENCODING"] = "utf-8"
+        
+        
+
+
         result = subprocess.run(
             ["piper", "--model", model_path, "--output_raw"],
             input=t.encode("utf-8"),
-            capture_output=True
+            capture_output=True,
+            env=env
         )
         if result.returncode != 0:
             log.error("[TTS] Piper stderr: %s", result.stderr.decode(errors='replace'))
