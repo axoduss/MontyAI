@@ -95,6 +95,17 @@ volatile uint32_t micEnableAfterMs = 10;  // millis() dopo cui il mic può ascol
 #define BMP280_ADDR  0x76 
 
 
+// ─── CONFIGURAZIONE SENSORI IMU ──────────────────────────────────────────────────
+#define SENSOR_READ_INTERVAL_MS    100   // Lettura accelerometro a 10Hz (per tap detection)
+#define SENSOR_REPORT_INTERVAL_MS  1000  // Invio dati al server ogni 1s
+#define TAP_THRESHOLD              2.5f  // Soglia accelerazione per "colpetto" (in g)
+#define TAP_COOLDOWN_MS            1000  // Cooldown tra tap consecutivi
+#define TILT_THRESHOLD_DEG         35.0f // Gradi di inclinazione per allarme
+#define TILT_SUSTAINED_MS          500   // ms di inclinazione continua per triggerare
+#define FREEFALL_THRESHOLD         0.3f  // Sotto 0.3g = caduta libera
+#define FREEFALL_DURATION_MS       150   // ms di caduta libera per triggerare
+
+
 // ─── OGGETTI GLOBALI ─────────────────────────────────────────────────────────
 WebSocketsClient wsAudio;   // WebSocket per stream audio → server
 WebSocketsClient wsCmd;     // WebSocket per comandi JSON ← server
@@ -139,6 +150,40 @@ volatile uint32_t userLedOverrideUntil = 0;
 // Espressione impostata dal server (LLM) — ha priorità sull'automatica
 volatile bool serverExpressionActive = false;
 EyeExpression serverExpression = EXP_NEUTRAL;
+
+
+
+
+// Struttura per stato sensori (condivisa con altri task se necessario)
+struct SensorState {
+  // BMP280
+  float temperature;
+  float pressure;
+  
+  // MPU6500 - valori correnti
+  float accelX, accelY, accelZ;
+  float gyroX, gyroY, gyroZ;
+  
+  // Valori derivati
+  float accelMagnitude;  // |a| = sqrt(x²+y²+z²)
+  float tiltAngleX;      // inclinazione asse X (gradi)
+  float tiltAngleY;      // inclinazione asse Y (gradi)
+  
+  // Eventi
+  bool tapDetected;
+  float tapIntensity;
+  bool tiltAlert;
+  bool freefallDetected;
+  
+  // Timestamp
+  uint32_t lastTapMs;
+  uint32_t tiltStartMs;
+  uint32_t freefallStartMs;
+};
+
+volatile SensorState sensorState = {};
+SemaphoreHandle_t sensorMutex;
+
 
 // ─── TTS con struct che include lunghezza ──────────────────────
 typedef struct {
@@ -1466,15 +1511,17 @@ void setupSensors() {
   Wire.begin(I2C_SDA, I2C_SCL);
   Serial.println("[SENS] Inizializzazione I2C...");
 
+  // Crea mutex per accesso thread-safe ai dati sensori
+  sensorMutex = xSemaphoreCreateMutex();
+
   // Inizializza BMP280
   if (!bmp.begin(BMP280_ADDR)) {
     Serial.println("[SENS] ERRORE: BMP280 non trovato!");
   } else {
-    // Configurazione base BMP280
-    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     
-                    Adafruit_BMP280::SAMPLING_X2,     
-                    Adafruit_BMP280::SAMPLING_X16,    
-                    Adafruit_BMP280::FILTER_X16,      
+    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,
+                    Adafruit_BMP280::SAMPLING_X2,
+                    Adafruit_BMP280::SAMPLING_X16,
+                    Adafruit_BMP280::FILTER_X16,
                     Adafruit_BMP280::STANDBY_MS_500);
     Serial.println("[SENS] BMP280 pronto.");
   }
@@ -1483,45 +1530,261 @@ void setupSensors() {
   if (!mpu.init()) {
     Serial.println("[SENS] ERRORE: MPU6500 non trovato!");
   } else {
-    Serial.println("[SENS] MPU6500 pronto. Calibrazione in corso...");
-    mpu.autoOffsets(); // Calibrazione automatica all'avvio
-    Serial.println("[SENS] Calibrazione MPU6500 completata.");
+    Serial.println("[SENS] MPU6500 pronto. Calibrazione...");
+    delay(1000); // Attendi che il robot sia fermo
+    mpu.autoOffsets();
+    
+    // Configura range per migliore sensibilità ai tap
+    mpu.setAccRange(MPU6500_ACC_RANGE_4G);   // ±4g: buon compromesso
+    mpu.setGyrRange(MPU6500_GYRO_RANGE_500); // ±500°/s
+    
+    Serial.println("[SENS] MPU6500 calibrato e configurato.");
   }
+  
+  // Inizializza stato
+  memset((void*)&sensorState, 0, sizeof(SensorState));
 }
 
 // ─── TASK: LETTURA SENSORI ───────────────────────────────────────────────────
 /*
- * Legge i dati dai sensori I2C ogni secondo e li invia al server
- * tramite WebSocket in formato JSON.
+ * Questo task fa DUE cose a frequenze diverse:
+ *   - Ogni 100ms: legge accelerometro/giroscopio per rilevare eventi rapidi
+ *   - Ogni 1000ms: legge anche BMP280 e invia report completo al server
+ *
+ * Eventi rilevati localmente (bassa latenza):
+ *   - TAP: picco improvviso di accelerazione
+ *   - TILT: inclinazione eccessiva sostenuta
+ *   - FREEFALL: accelerazione vicina a 0 (caduta)
  */
+
 void taskSensors(void* param) {
   Serial.println("[SENS Task] Avviato.");
 
+  uint32_t lastReportMs = 0;
+  uint32_t lastReadMs = 0;
+  
+  // Buffer per media mobile (smoothing)
+  float accelHistory[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+  uint8_t histIdx = 0;
+  
+  // Stato locale per rilevamento eventi
+  bool wasTilted = false;
+  uint32_t tiltStartMs = 0;
+  uint32_t freefallStartMs = 0;
+  bool wasInFreefall = false;
+
   for (;;) {
-    // Leggi solo se il WebSocket dei comandi è connesso per evitare sprechi
-    if (wsCmdConnected) {
-      // Lettura BMP280
-      float temp = bmp.readTemperature();
-      float press = bmp.readPressure() / 100.0F; // Converte in hPa
+    uint32_t now = millis();
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // LETTURA RAPIDA (ogni 100ms = 10Hz)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (now - lastReadMs >= SENSOR_READ_INTERVAL_MS) {
+      lastReadMs = now;
 
       // Lettura MPU6500
-      xyzFloat gValue = mpu.getGValues();   // Accelerometro (g)
-      xyzFloat gyr = mpu.getGyrValues();    // Giroscopio (gradi/s)
+      xyzFloat gValue = mpu.getGValues();
+      xyzFloat gyr = mpu.getGyrValues();
 
-      // Prepara il payload JSON
-      char payload[256];
-      snprintf(payload, sizeof(payload),
-        "{\"event\":\"sensor_data\",\"temp\":%.2f,\"press\":%.2f,\"accel\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f},\"gyro\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}}",
-        temp, press, gValue.x, gValue.y, gValue.z, gyr.x, gyr.y, gyr.z);
+      float ax = gValue.x;
+      float ay = gValue.y;
+      float az = gValue.z;
+      float gx = gyr.x;
+      float gy = gyr.y;
+      float gz = gyr.z;
 
-      // Invia al server
-      wsCmd.sendTXT(payload);
+      // Magnitudine accelerazione totale
+      float accelMag = sqrtf(ax * ax + ay * ay + az * az);
+
+      // Media mobile per filtrare rumore
+      accelHistory[histIdx] = accelMag;
+      histIdx = (histIdx + 1) % 5;
+      float avgMag = 0;
+      for (int i = 0; i < 5; i++) avgMag += accelHistory[i];
+      avgMag /= 5.0f;
+
+      // Calcolo angoli di inclinazione (gradi)
+      float tiltX = atan2f(ay, sqrtf(ax * ax + az * az)) * 57.2958f;
+      float tiltY = atan2f(ax, sqrtf(ay * ay + az * az)) * 57.2958f;
+
+      // ── TAP DETECTION ──────────────────────────────────────────────────
+      // Un "tap" è un picco improvviso: magnitudine molto sopra 1g
+      float deviation = fabsf(accelMag - avgMag);
+      bool tapNow = (accelMag > TAP_THRESHOLD) && 
+                    (deviation > 1.0f) &&
+                    (now - sensorState.lastTapMs > TAP_COOLDOWN_MS);
+
+      if (tapNow) {
+        Serial.printf("[SENS] 🤜 TAP rilevato! Intensità: %.2fg (dev: %.2f)\n", 
+                      accelMag, deviation);
+
+        xSemaphoreTake(sensorMutex, portMAX_DELAY);
+        sensorState.tapDetected = true;
+        sensorState.tapIntensity = accelMag;
+        sensorState.lastTapMs = now;
+        xSemaphoreGive(sensorMutex);
+
+        // Invia evento immediatamente al server
+        if (wsCmdConnected) {
+          char payload[128];
+          snprintf(payload, sizeof(payload),
+            "{\"event\":\"tap_detected\",\"intensity\":%.2f,\"accel\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}}",
+            accelMag, ax, ay, az);
+          wsCmd.sendTXT(payload);
+        }
+
+        // Feedback visivo immediato
+        userLedOverride = true;
+        userLedOverrideUntil = millis() + 1500;
+        setLedColor(255, 100, 0); // arancione flash
+      }
+
+      // ── TILT DETECTION ─────────────────────────────────────────────────
+      bool isTilted = (fabsf(tiltX) > TILT_THRESHOLD_DEG) || 
+                      (fabsf(tiltY) > TILT_THRESHOLD_DEG);
+
+      if (isTilted && !wasTilted) {
+        tiltStartMs = now;
+      }
+
+      if (isTilted && (now - tiltStartMs > TILT_SUSTAINED_MS) && !sensorState.tiltAlert) {
+        Serial.printf("[SENS] ⚠️ TILT eccessivo! X=%.1f° Y=%.1f°\n", tiltX, tiltY);
+
+        xSemaphoreTake(sensorMutex, portMAX_DELAY);
+        sensorState.tiltAlert = true;
+        xSemaphoreGive(sensorMutex);
+
+        // Invia evento al server
+        if (wsCmdConnected) {
+          char payload[128];
+          snprintf(payload, sizeof(payload),
+            "{\"event\":\"tilt_alert\",\"angle_x\":%.1f,\"angle_y\":%.1f}",
+            tiltX, tiltY);
+          wsCmd.sendTXT(payload);
+        }
+
+        // Feedback: LED rosso lampeggiante
+        userLedOverride = true;
+        userLedOverrideUntil = millis() + 3000;
+        setLedColor(255, 0, 0);
+      }
+
+      // Reset tilt quando torna in posizione
+      if (!isTilted && sensorState.tiltAlert) {
+        xSemaphoreTake(sensorMutex, portMAX_DELAY);
+        sensorState.tiltAlert = false;
+        xSemaphoreGive(sensorMutex);
+
+        if (wsCmdConnected) {
+          wsCmd.sendTXT("{\"event\":\"tilt_recovered\"}");
+        }
+        userLedOverride = false;
+        Serial.println("[SENS] ✓ Inclinazione recuperata.");
+      }
+      wasTilted = isTilted;
+
+      // ── FREEFALL DETECTION ─────────────────────────────────────────────
+      bool inFreefall = (accelMag < FREEFALL_THRESHOLD);
+
+      if (inFreefall && !wasInFreefall) {
+        freefallStartMs = now;
+      }
+
+      if (inFreefall && (now - freefallStartMs > FREEFALL_DURATION_MS) && !sensorState.freefallDetected) {
+        Serial.println("[SENS] 🆘 CADUTA LIBERA rilevata!");
+
+        xSemaphoreTake(sensorMutex, portMAX_DELAY);
+        sensorState.freefallDetected = true;
+        xSemaphoreGive(sensorMutex);
+
+        if (wsCmdConnected) {
+          wsCmd.sendTXT("{\"event\":\"freefall_detected\"}");
+        }
+
+        // Stop motori per sicurezza
+        motorStop();
+        setLedColor(255, 0, 0);
+        userLedOverride = true;
+        userLedOverrideUntil = millis() + 5000;
+      }
+
+      if (!inFreefall && sensorState.freefallDetected) {
+        xSemaphoreTake(sensorMutex, portMAX_DELAY);
+        sensorState.freefallDetected = false;
+        xSemaphoreGive(sensorMutex);
+        Serial.println("[SENS] ✓ Caduta terminata (impatto o recupero).");
+      }
+      wasInFreefall = inFreefall;
+
+      // ── AGGIORNA STATO CONDIVISO ───────────────────────────────────────
+      xSemaphoreTake(sensorMutex, portMAX_DELAY);
+      sensorState.accelX = ax;
+      sensorState.accelY = ay;
+      sensorState.accelZ = az;
+      sensorState.gyroX = gx;
+      sensorState.gyroY = gy;
+      sensorState.gyroZ = gz;
+      sensorState.accelMagnitude = accelMag;
+      sensorState.tiltAngleX = tiltX;
+      sensorState.tiltAngleY = tiltY;
+      xSemaphoreGive(sensorMutex);
     }
 
-    // Attendi 1 secondo prima della prossima lettura (regola a piacimento)
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    // ══════════════════════════════════════════════════════════════════════════
+    // REPORT PERIODICO (ogni 1s)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (now - lastReportMs >= SENSOR_REPORT_INTERVAL_MS) {
+      lastReportMs = now;
+
+      if (wsCmdConnected) {
+        // Lettura BMP280 (lenta, 1Hz è sufficiente)
+        float temp = bmp.readTemperature();
+        float press = bmp.readPressure() / 100.0F;
+
+        xSemaphoreTake(sensorMutex, portMAX_DELAY);
+        sensorState.temperature = temp;
+        sensorState.pressure = press;
+        float ax = sensorState.accelX;
+        float ay = sensorState.accelY;
+        float az = sensorState.accelZ;
+        float gx = sensorState.gyroX;
+        float gy = sensorState.gyroY;
+        float gz = sensorState.gyroZ;
+        float tiltX = sensorState.tiltAngleX;
+        float tiltY = sensorState.tiltAngleY;
+        float mag = sensorState.accelMagnitude;
+        xSemaphoreGive(sensorMutex);
+
+        // Payload JSON completo
+        char payload[384];
+        snprintf(payload, sizeof(payload),
+          "{\"event\":\"sensor_data\","
+          "\"temp\":%.1f,\"press\":%.1f,"
+          "\"accel\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"mag\":%.2f},"
+          "\"gyro\":{\"x\":%.1f,\"y\":%.1f,\"z\":%.1f},"
+          "\"tilt\":{\"x\":%.1f,\"y\":%.1f},"
+           "\"state\":{\"tap\":%s,\"tilt\":%s,\"freefall\":%s}}",
+          temp, press,
+          ax, ay, az, mag,
+          gx, gy, gz,
+          tiltX, tiltY,
+          sensorState.tapDetected ? "true" : "false",
+          sensorState.tiltAlert ? "true" : "false",
+          sensorState.freefallDetected ? "true" : "false");
+
+        wsCmd.sendTXT(payload);
+
+        // Reset flag tap dopo il report (evento one-shot)
+        xSemaphoreTake(sensorMutex, portMAX_DELAY);
+        sensorState.tapDetected = false;
+        xSemaphoreGive(sensorMutex);
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(20)); // 50Hz loop interno, eventi controllati dai timer
   }
 }
+
 
 // ─── UTILITY ─────────────────────────────────────────────────────────────────
 int16_t computeRMS(int16_t* samples, size_t count) {
