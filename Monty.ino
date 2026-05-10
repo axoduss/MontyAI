@@ -98,7 +98,7 @@ volatile uint32_t micEnableAfterMs = 10;  // millis() dopo cui il mic può ascol
 // ─── CONFIGURAZIONE SENSORI IMU ──────────────────────────────────────────────────
 #define SENSOR_READ_INTERVAL_MS    20   // Lettura accelerometro a 10Hz (per tap detection)
 #define SENSOR_REPORT_INTERVAL_MS  1000  // Invio dati al server ogni 1s
-#define TAP_THRESHOLD              1.5f  // Soglia accelerazione per "colpetto" (in g)
+#define TAP_THRESHOLD              0.2f  // Soglia accelerazione per "colpetto" (in g)
 #define TAP_COOLDOWN_MS            1000  // Cooldown tra tap consecutivi
 #define TILT_THRESHOLD_DEG         20.0f // Gradi di inclinazione per allarme
 #define TILT_SUSTAINED_MS          500   // ms di inclinazione continua per triggerare

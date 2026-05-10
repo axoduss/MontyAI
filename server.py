@@ -1181,17 +1181,17 @@ async def ws_cmd(ws: WebSocket):
                         # Intensità diversa → reazione diversa
                         if intensity > 1:
                             prompt = (
-                                f"[EVENTO FISICO] Qualcuno ti ha dato un colpo forte (intensità: {intensity:.1f}g)! "
-                                f"Reagisci in modo sorpreso/spaventato/arrabbiato."
+                                f"[EVENTO FISICO] Ti hanno dato un colpo molto forte (intensità: {intensity:.1f}g)! "
+                                f"Reagisci in modo arrabbiatissimo."
                             )
                         elif intensity > 0.5:
                             prompt = (
-                                f"[EVENTO FISICO] Qualcuno ti ha dato un colpetto medio (intensità: {intensity:.1f}g). "
-                                f"Reagisci in modo un po' infastidito ma simpatico. "
+                                f"[EVENTO FISICO] Ti hanno dato un colpetto medio (intensità: {intensity:.1f}g). "
+                                f"Reagisci in modo un po' infastidito. "
                             )
                         else:
                             prompt = (
-                                f"[EVENTO FISICO] Qualcuno ti ha toccato leggermente (intensità: {intensity:.1f}g). "
+                                f"[EVENTO FISICO] TI hanno toccato leggermente (intensità: {intensity:.1f}g). "
                                 f"Reagisci in modo curioso o divertito."
                             )
                         asyncio.create_task(safe_run_pipeline_from_text(prompt))
