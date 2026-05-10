@@ -47,9 +47,9 @@ MAX_AUDIO_SEC    = 30
 # ─── SYSTEM PROMPT (generato dinamicamente) ───────────────────────────────────
 _SKILLS_SECTION = get_skills_prompt_section()
 
-SYSTEM_PROMPT = f"""Sei Monty, un robot mobile. L'utente si chiama Andrea.
+SYSTEM_PROMPT = f"""Sei Monty, un robot. Il tuo padrone si chiama Andrea.
 
-Hardware: 4 LED NeoPixel (0-3), 2 motori DC differenziali, 2 bumper, microfono, speaker, display OLED 128x64.
+Hardware: 4 LED NeoPixel (0-3), 2 motori DC differenziali, 2 bumper, microfono, speaker, display OLED 128x64, sensore BMP280 (temperatura + pressione barometrica), IMU (accelerometro + giroscopio)..
 
 Rispondi SEMPRE e SOLO con JSON valido:
 {{"commands":[...],"speech":"<max 2 frasi>","emotion":"<emozione>"}}
@@ -282,10 +282,7 @@ async def synthesize_and_send(text: str, emotion: str = "happy"):
     log.info("[TTS] Sintesi: '%s'", text)
 
     def run_piper(t: str) -> bytes:
-        
-        log.info("[TTS] repr del testo: %s", repr(t))
-        log.info("[TTS] hex: %s", t.encode("utf-8").hex())
-        
+               
         t = unicodedata.normalize("NFC", t)
         model_path = os.path.join(os.path.dirname(__file__), "it_IT-riccardo-x_low.onnx")
         
@@ -358,7 +355,7 @@ async def synthesize_and_send(text: str, emotion: str = "happy"):
         # 1024 byte = 512 campioni @ 22050Hz = ~23.2ms di audio
         # Inviamo a gruppi di 8 chunk, poi aspettiamo
         BATCH_SIZE = 4
-        BATCH_DELAY = 0.08  # 150ms ≈ ~185ms di audio in 8 chunk
+        BATCH_DELAY = 0.08  # 80ms di audio in 8 chunk
         
         for i in range(0, len(audio_bytes), chunk_size):
             chunk = audio_bytes[i:i + chunk_size]
@@ -415,68 +412,68 @@ def _format_skill_data_for_llm(skill_results: dict) -> str:
         parts.append(format_skill_result(skill_name, result))
     return "\n".join(parts)            
 
-def format_skill_response(speech: str, skill_results: dict) -> str:
-    """
-    Formatta la risposta speech includendo i dati delle skill eseguite.
-    L'LLM genera uno speech template che può contenere placeholder come:
-    - {datetime}, {date}, {time} per get_current_datetime
-    - {temperature}, {weather}, {description} per get_weather
-    - {news} per get_news
-    - {search_results} per web_search
-    """
-    if not skill_results:
-        return speech
+# def format_skill_response(speech: str, skill_results: dict) -> str:
+    # """
+    # Formatta la risposta speech includendo i dati delle skill eseguite.
+    # L'LLM genera uno speech template che può contenere placeholder come:
+    # - {datetime}, {date}, {time} per get_current_datetime
+    # - {temperature}, {weather}, {description} per get_weather
+    # - {news} per get_news
+    # - {search_results} per web_search
+    # """
+    # if not skill_results:
+        # return speech
     
-    format_data = {}
+    # format_data = {}
     
-    for skill_name, result in skill_results.items():
-        if not result.get("success", False):
-            continue
+    # for skill_name, result in skill_results.items():
+        # if not result.get("success", False):
+            # continue
             
-        data = result.get("data", {})
+        # data = result.get("data", {})
         
-        if skill_name == "get_current_datetime":
-            format_data["datetime"] = data.get("datetime", "")
-            format_data["date"] = data.get("date", "")
-            format_data["time"] = data.get("time", "")
-            format_data["day_of_week"] = data.get("day_of_week", "")
+        # if skill_name == "get_current_datetime":
+            # format_data["datetime"] = data.get("datetime", "")
+            # format_data["date"] = data.get("date", "")
+            # format_data["time"] = data.get("time", "")
+            # format_data["day_of_week"] = data.get("day_of_week", "")
             
-        elif skill_name == "get_weather":
-            format_data["temperature"] = f"{data.get('temperature', 0)}°C"
-            format_data["description"] = data.get("description", "")
-            format_data["weather"] = f"{format_data['description']}, {format_data['temperature']}"
-            format_data["windspeed"] = f"{data.get('windspeed', 0)} km/h"
+        # elif skill_name == "get_weather":
+            # format_data["temperature"] = f"{data.get('temperature', 0)}°C"
+            # format_data["description"] = data.get("description", "")
+            # format_data["weather"] = f"{format_data['description']}, {format_data['temperature']}"
+            # format_data["windspeed"] = f"{data.get('windspeed', 0)} km/h"
             
-        elif skill_name == "get_news":
-            news_list = data.get("news", [])
-            if news_list:
-                news_text = "\n".join(
-                    f"  • {n.get('title', '?')}"
-                    for n in news_list
-                )
-                parts.append(f"- Notizie ({data.get('source', 'fonte sconosciuta')}):\n{news_text}")
-            else:
-                parts.append("- Notizie: nessuna trovata")
+        # elif skill_name == "get_news":
+            # news_list = data.get("news", [])
+            # if news_list:
+                # news_text = "\n".join(
+                    # f"  • {n.get('title', '?')}"
+                    # for n in news_list
+                # )
+                # parts.append(f"- Notizie ({data.get('source', 'fonte sconosciuta')}):\n{news_text}")
+            # else:
+                # parts.append("- Notizie: nessuna trovata")
                 
-        elif skill_name == "web_search":
-            results = data.get("results", [])
-            if results:
-                search_text = "\n".join(
-                    f"  • {r.get('title', '?')}"
-                    for r in results
-                )
-                parts.append(f"- Ricerca web (query: {data.get('query', '?')}):\n{search_text}")
-            else:
-                parts.append("- Ricerca web: nessun risultato")
+        # elif skill_name == "web_search":
+            # results = data.get("results", [])
+            # if results:
+                # search_text = "\n".join(
+                    # f"  • {r.get('title', '?')}"
+                    # for r in results
+                # )
+                # parts.append(f"- Ricerca web (query: {data.get('query', '?')}):\n{search_text}")
+            # else:
+                # parts.append("- Ricerca web: nessun risultato")
     
-    # Sostituisci i placeholder nello speech
-    try:
-        formatted = speech.format(**format_data)
-        log.info("[SkillResponse] Speech formattato: %s", formatted)
-        return formatted
-    except KeyError as e:
-        log.warning("[SkillResponse] Placeholder mancante: %s, uso speech originale", e)
-        return speech
+    # # Sostituisci i placeholder nello speech
+    # try:
+        # formatted = speech.format(**format_data)
+        # log.info("[SkillResponse] Speech formattato: %s", formatted)
+        # return formatted
+    # except KeyError as e:
+        # log.warning("[SkillResponse] Placeholder mancante: %s, uso speech originale", e)
+        # return speech
 
 
 # ─── PIPELINE PRINCIPALE ─────────────────────────────────────────────────────
@@ -642,42 +639,7 @@ async def run_pipeline_from_text(text: str):
 
     # Chiama la logica centralizzata
     await _core_pipeline(text)
-
-
-
-async def run_pipeline(audio_bytes: bytes):
-    """Esegue STT → passa il testo alla pipeline core."""
-    if len(audio_bytes) < SAMPLE_RATE * 2 * 0.3:  # meno di 300ms
-        log.warning("[Pipeline] Audio troppo corto, skip.")
-        await set_robot_state("idle")
-        return
-
-    await set_robot_state("processing")
-    robot.log_event("pipeline_start", {"audio_bytes": len(audio_bytes)})
-
-    # ── STT ──────────────────────────────────────────────────────────────────
-    robot.log_event("stt_start", {})
-    transcript = await asyncio.to_thread(transcribe_audio, audio_bytes)
-    robot.log_event("stt_result", {"text": transcript})
-
-    if not transcript:
-        log.warning("[Pipeline] Trascrizione vuota.")
-        await set_robot_state("idle")
-        return
-
-    # Chiama la logica centralizzata
-    await _core_pipeline(transcript)
-
-
-async def run_pipeline_from_text(text: str):
-    """Pipeline senza STT — usato dalla dashboard."""
-    await set_robot_state("processing")
-    robot.log_event("text_input", {"text": text})
-
-    # Chiama la logica centralizzata
-    await _core_pipeline(text)
-
-
+   
 
 # ─── SAFE WRAPPERS ───────────────────────────────────────────────────
 async def safe_run_pipeline(audio_bytes: bytes):
