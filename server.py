@@ -44,8 +44,15 @@ OLLAMA_MODEL     = "gemma4:e4b"
 OLLAMA_HOST      = "http://127.0.0.1:11434"
 MAX_AUDIO_SEC    = 30
 
+
+VALID_EMOTIONS = (
+    "neutral", "happy", "sad", "angry", "surprised", "sleepy",
+    "thinking", "love", "wink", "skeptical", "excited", "confused"
+)
+
 # ─── SYSTEM PROMPT (generato dinamicamente) ───────────────────────────────────
 _SKILLS_SECTION = get_skills_prompt_section()
+_EMOTIONS_STR = ", ".join(VALID_EMOTIONS)
 
 SYSTEM_PROMPT = f"""Sei Monty, un robot. Il tuo padrone si chiama Andrea.
 
@@ -56,7 +63,7 @@ Rispondi SEMPRE e SOLO con JSON valido:
 Campo opzionale: "display":{{...}}
 
 ═══ EMOZIONI ═══
-neutral, happy, sad, angry, surprised, sleepy, thinking, love, wink, skeptical, excited, confused
+{_EMOTIONS_STR}
 
 ═══ COMANDI ═══
 LED:
@@ -560,13 +567,10 @@ async def _core_pipeline(text: str):
                     hardware_commands.append(cmd_obj)
     
     # Valida emozione
-    valid_emotions = {
-        "neutral", "happy", "sad", "angry", "surprised", "sleepy",
-        "thinking", "love", "wink", "skeptical", "excited", "confused"
-    }
-    if emotion not in valid_emotions:
+    if emotion not in VALID_EMOTIONS:
         log.warning("[Core Pipeline] Emozione '%s' non valida, uso 'neutral'", emotion)
         emotion = "neutral"
+    
 
     log.info("[Core Pipeline] emotion=%s, hw_commands=%d, skills=%d, display=%s, speech=%s, music=%s",
              emotion, len(hardware_commands), len(skill_results), bool(display_cmd), bool(speech), bool(music_pcm))
@@ -812,12 +816,8 @@ async def execute_command(cmd_obj: dict):
         params["duration_ms"] = max(0, min(60000, int(params.get("duration_ms", 10000))))
 
     if cmd == "display_expression":
-        valid_expressions = {
-            "neutral", "happy", "sad", "angry", "surprised", "sleepy",
-            "thinking", "love", "wink", "skeptical", "excited", "confused"
-        }
         exp = params.get("expression", "neutral")
-        if exp not in valid_expressions:
+        if exp not in VALID_EMOTIONS:
             log.warning("[CMD] Espressione '%s' non valida, uso 'neutral'", exp)
             params["expression"] = "neutral"
 
