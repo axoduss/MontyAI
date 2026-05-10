@@ -737,6 +737,9 @@ async def execute_command(cmd_obj: dict):
         # Estrai parametri della skill (rimuovendo "skill" dal dict)
         skill_params = {k: v for k, v in params.items() if k != "skill"}
         
+        if skill_name == "get_sensor_data":
+            skill_params["sensor_data"] = robot.last_sensor_data
+        
         log.info("[SKILL] Esecuzione: %s con params: %s", skill_name, skill_params)
         result = await execute_skill(skill_name, **skill_params)
         return result
