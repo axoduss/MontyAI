@@ -56,7 +56,7 @@ _EMOTIONS_STR = ", ".join(VALID_EMOTIONS)
 
 SYSTEM_PROMPT = f"""Sei Monty, un robot. Il tuo padrone si chiama Andrea.
 
-Hardware: 4 LED NeoPixel (0-3), 2 motori DC differenziali, 2 bumper, microfono, speaker, display OLED 128x64, sensore BMP280 (temperatura + pressione barometrica), IMU (accelerometro + giroscopio)..
+Hardware: 4 LED NeoPixel (0-3), 2 motori DC differenziali, 2 bumper, microfono, speaker, display OLED 128x64, sensore BMP280 (temperatura + pressione barometrica), IMU (accelerometro + giroscopio), sensore ultrasuoni HC-SR04 frontale.
 
 Rispondi SEMPRE e SOLO con JSON valido:
 {{"commands":[...],"speech":"<max 2 frasi>","emotion":"<emozione>"}}
@@ -73,6 +73,15 @@ LED:
 MOTORI (speed:0-255, duration_ms:0-10000, USA SEMPRE duration_ms>0):
 - move_forward/move_backward/turn_left/turn_right: {{"speed":150,"duration_ms":2000}}
 - stop: {{}}
+
+ULTRASUONI (sensore frontale HC-SR04, anticollisione sempre attiva):
+- us_get_distance: {{}} → risponde con distanza attuale in cm
+- us_set_mode: {{"mode":"monitor|follow|scan"}} (monitor=anticollisione, follow=segui persona, scan=mappa 360°)
+- us_scan: {{}} → avvia scansione 360° per creare mappa dell'ambiente
+- us_stop_follow: {{}} → ferma modalità follow-me
+- us_follow_config: {{"speed":120}} → configura velocità follow (60-255)
+- us_calibrate_yaw: {{}} → resetta orientamento a 0°
+NOTA: L'anticollisione è SEMPRE attiva. Se chiedi di andare avanti e c'è un ostacolo, il robot si ferma da solo.
 
 {_SKILLS_SECTION}
 
@@ -113,7 +122,17 @@ class RobotState:
         self.current_emotion = "neutral"          
         self.display_mode = "eyes"         
         self.last_sensor_data: dict = {}   # ultimo report sensori
-        self.last_sensor_broadcast: float = 0  # timestamp ultimo broadcast sensori        
+        self.last_sensor_broadcast: float = 0  # timestamp ultimo broadcast sensori
+        # ── Ultrasuoni ──
+        self.us_distance: float = -1.0          # ultima distanza filtrata (cm)
+        self.us_raw_distance: float = -1.0      # distanza grezza
+        self.us_obstacle: bool = False           # ostacolo rilevato
+        self.us_mode: str = "monitor"            # monitor | follow | scan
+        self.us_scanning: bool = False           # scansione in corso
+        self.us_scan_data: list[dict] = []       # dati ultima scansione [{a:angolo, d:distanza}, ...]
+        self.us_scan_progress: int = 0           # % completamento scansione
+        self.us_yaw: float = 0.0                 # heading corrente dal IMU
+        self.last_us_broadcast: float = 0        # timestamp ultimo broadcast US        
 
     def log_event(self, event_type: str, data: dict):
         """Notifica tutte le dashboard connesse."""
@@ -671,6 +690,9 @@ COMMAND_CATEGORIES = {
     "led":   {"set_led", "set_led_off"},
     "display": {"display_expression", "display_look", "display_text", 
                 "display_progress", "display_icon", "display_split", "display_eyes"},
+    "ultrasonic": {"us_get_distance", "us_set_mode", "us_scan", 
+               "us_stop_follow", "us_follow_config", "us_get_scan_data",
+               "us_calibrate_yaw"},
     "servo": {"set_servo", "servo_sweep"},       # futuro
     "sound": {"play_tone", "play_melody"},        # futuro
 }
@@ -743,6 +765,16 @@ async def execute_command(cmd_obj: dict):
         
         if skill_name == "get_sensor_data":
             skill_params["sensor_data"] = robot.last_sensor_data
+            skill_params["ultrasonic_data"] = {
+                "distance_cm": robot.us_distance,
+                "obstacle": robot.us_obstacle,
+                "mode": robot.us_mode,
+                "yaw": robot.us_yaw,
+            }
+        
+        # Aggiorna yaw per la dashboard
+        # if "yaw" in data:
+            # robot.us_yaw = data["yaw"]
         
         log.info("[SKILL] Esecuzione: %s con params: %s", skill_name, skill_params)
         result = await execute_skill(skill_name, **skill_params)
@@ -753,7 +785,10 @@ async def execute_command(cmd_obj: dict):
         "move_forward", "move_backward",
         "turn_left", "turn_right", "stop",
         "display_expression", "display_look", "display_text",
-        "display_progress", "display_icon", "display_split", "display_eyes"
+        "display_progress", "display_icon", "display_split", "display_eyes",
+        "us_get_distance", "us_set_mode", "us_scan",
+        "us_stop_follow", "us_follow_config", "us_get_scan_data",
+        "us_calibrate_yaw"
     }
     if cmd not in allowed:
         log.warning("[CMD] Comando non permesso: %s", cmd)
@@ -826,6 +861,20 @@ async def execute_command(cmd_obj: dict):
         d = params.get("direction", "center")
         if d not in valid_dirs:
             params["direction"] = "center"
+    
+    # Validazione parametri ultrasuoni
+    if cmd == "us_set_mode":
+        mode = params.get("mode", "monitor")
+        if mode not in ("monitor", "follow", "scan"):
+            log.warning("[CMD] Modalità US '%s' non valida, uso 'monitor'", mode)
+            params["mode"] = "monitor"
+        if mode == "follow":
+            params["speed"] = max(60, min(255, int(params.get("speed", 120))))
+
+    if cmd == "us_follow_config":
+        params["speed"] = max(60, min(255, int(params.get("speed", 120))))
+        if "target_cm" in params:
+            params["target_cm"] = max(30, min(300, int(params["target_cm"])))
             
 
 
@@ -874,6 +923,9 @@ async def execute_commands_parallel(commands: list[dict]):
         
     if "display" in groups:
         tasks.append(run_display_sequence(groups["display"]))
+        
+    if "ultrasonic" in groups:
+        tasks.append(run_immediate_commands(groups["ultrasonic"]))
 
     if "system" in groups:
         tasks.append(run_immediate_commands(groups["system"]))
@@ -1122,8 +1174,31 @@ async def ws_cmd(ws: WebSocket):
                     
                 # ACK comandi
                 elif data.get("ack"):
+                    ack_type = data["ack"]
                     log.info("[WS Cmd] ACK: %s", data)
                     robot.log_event("esp32_ack", data)
+                    
+                    # ── ACK ultrasuoni che richiedono risposta vocale ──
+                    if ack_type == "us_get_distance":
+                        dist = data.get("distance_cm", -1)
+                        obstacle = data.get("obstacle", False)
+                        
+                        if dist < 0:
+                            response_text = "Non rilevo nessun ostacolo davanti a me, la via è libera."
+                        elif obstacle:
+                            response_text = f"Attenzione! C'è un ostacolo molto vicino, a soli {dist:.0f} centimetri."
+                        elif dist < 50:
+                            response_text = f"C'è qualcosa a {dist:.0f} centimetri davanti a me, abbastanza vicino."
+                        elif dist < 150:
+                            response_text = f"Rilevo un ostacolo a circa {dist:.0f} centimetri."
+                        else:
+                            response_text = f"L'ostacolo più vicino è a {dist:.0f} centimetri, abbastanza lontano."
+                        
+                        # Rispondi vocalmente
+                        if robot.current_state in ("processing", "idle"):
+                            await set_robot_state("speaking")
+                            await synthesize_and_send(response_text, "neutral")
+                            await set_robot_state("idle")
                     
                  # Eventi bumper
                 elif data.get("event") == "bumper_hit":
@@ -1227,6 +1302,95 @@ async def ws_cmd(ws: WebSocket):
                             "[EVENTO CRITICO] Stai cadendo! Caduta libera rilevata! "
                             "Urla brevemente di paura. Max 3-4 parole."
                         ))
+                # ── Eventi ultrasuoni ─────────────────────────────────────────
+                elif data.get("event") == "us_data":
+                    # Report periodico distanza (ogni 500ms dall'ESP32)
+                    robot.us_distance = data.get("distance_cm", -1.0)
+                    robot.us_raw_distance = data.get("raw_cm", -1.0)
+                    robot.us_obstacle = data.get("obstacle", False)
+                    robot.us_mode = data.get("mode", "monitor")
+                    robot.us_scanning = data.get("scanning", False)
+                    
+                    # Broadcast alla dashboard (throttled a 500ms)
+                    now = time.time()
+                    if now - robot.last_us_broadcast >= 0.5:
+                        robot.last_us_broadcast = now
+                        robot.log_event("us_data", {
+                            "distance_cm": robot.us_distance,
+                            "raw_cm": robot.us_raw_distance,
+                            "obstacle": robot.us_obstacle,
+                            "mode": robot.us_mode,
+                            "scanning": robot.us_scanning,
+                        })
+
+                elif data.get("event") == "us_anticollision":
+                    dist = data.get("distance_cm", 0)
+                    log.warning("[US] ⚠️ Anticollisione! Distanza: %.1f cm", dist)
+                    robot.log_event("us_anticollision", {"distance_cm": dist})
+                    
+                    # Abort sequenza motori in corso
+                    motor_abort_event.set()
+                    
+                    # Reazione LLM (solo se idle, per non interrompere conversazioni)
+                    if robot.current_state == "idle":
+                        asyncio.create_task(safe_run_pipeline_from_text(
+                            f"[EVENTO AUTOMATICO] Il sensore ultrasuoni ha rilevato un ostacolo a {dist:.0f} cm "
+                            f"e ti sei fermato automaticamente. Commenta brevemente."
+                        ))
+
+                elif data.get("event") == "move_blocked":
+                    dist = data.get("distance_cm", 0)
+                    reason = data.get("reason", "unknown")
+                    log.warning("[US] Movimento bloccato: %s a %.1f cm", reason, dist)
+                    robot.log_event("move_blocked", {"reason": reason, "distance_cm": dist})
+
+                elif data.get("event") == "follow_target_lost":
+                    log.info("[US] Follow-me: target perso")
+                    robot.log_event("follow_target_lost", {})
+                    
+                    if robot.current_state == "idle":
+                        asyncio.create_task(safe_run_pipeline_from_text(
+                            "[EVENTO AUTOMATICO] Stavi seguendo qualcuno ma l'hai perso di vista. "
+                            "Commenta brevemente con tono dispiaciuto."
+                        ))
+
+                elif data.get("event") == "scan_started":
+                    log.info("[US] Scansione 360° avviata")
+                    robot.us_scanning = True
+                    robot.us_scan_data = []
+                    robot.us_scan_progress = 0
+                    robot.log_event("scan_started", {})
+
+                elif data.get("event") == "scan_point":
+                    # Punto singolo della scansione (aggiornamento live)
+                    step = data.get("step", 0)
+                    angle = data.get("angle", 0)
+                    distance = data.get("distance", -1)
+                    
+                    robot.us_scan_data.append({"a": angle, "d": distance})
+                    robot.us_scan_progress = int((step + 1) * 100 / 36)
+                    
+                    # Broadcast live alla dashboard per rendering in tempo reale
+                    robot.log_event("scan_point", {
+                        "step": step,
+                        "angle": angle,
+                        "distance": distance,
+                        "progress": robot.us_scan_progress,
+                    })
+
+                elif data.get("event") == "scan_complete":
+                    points = data.get("points", 0)
+                    scan_data = data.get("data", [])
+                    log.info("[US] Scansione completata: %d punti", points)
+                    
+                    robot.us_scanning = False
+                    robot.us_scan_data = scan_data
+                    robot.us_scan_progress = 100
+                    
+                    robot.log_event("scan_complete", {
+                        "points": points,
+                        "data": scan_data,
+                    })
 
     except WebSocketDisconnect:
         log.info("[WS Cmd] ESP32 disconnesso (WebSocketDisconnect).")
@@ -1254,6 +1418,15 @@ async def ws_dashboard(ws: WebSocket):
             "led_color": robot.led_color,
             "esp32_audio": robot.audio_ws is not None,
             "esp32_cmd":   robot.cmd_ws is not None,
+             "ultrasonic": {
+                "distance_cm": robot.us_distance,
+                "obstacle": robot.us_obstacle,
+                "mode": robot.us_mode,
+                "scanning": robot.us_scanning,
+                "scan_progress": robot.us_scan_progress,
+                "scan_data": robot.us_scan_data,
+                "yaw": robot.us_yaw,
+            },
         }))
     except Exception:
         pass
@@ -1282,6 +1455,43 @@ async def ws_dashboard(ws: WebSocket):
                     text = data.get("text", "")
                     if text:
                         asyncio.create_task(safe_run_pipeline_from_text(text))
+                
+                # ── Comandi ultrasuoni dalla dashboard ────────────────────────
+                elif data.get("type") == "us_command":
+                    us_cmd = data.get("command", "")
+                    us_params = data.get("params", {})
+                    
+                    if us_cmd == "get_distance":
+                        await execute_command({"cmd": "us_get_distance", "params": {}})
+                    
+                    elif us_cmd == "set_mode":
+                        mode = us_params.get("mode", "monitor")
+                        speed = us_params.get("speed", 120)
+                        await execute_command({"cmd": "us_set_mode", "params": {"mode": mode, "speed": speed}})
+                    
+                    elif us_cmd == "scan":
+                        await execute_command({"cmd": "us_scan", "params": {}})
+                    
+                    elif us_cmd == "stop_follow":
+                        await execute_command({"cmd": "us_stop_follow", "params": {}})
+                    
+                    elif us_cmd == "calibrate_yaw":
+                        await execute_command({"cmd": "us_calibrate_yaw", "params": {}})
+                    
+                    elif us_cmd == "follow_config":
+                        speed = us_params.get("speed", 120)
+                        await execute_command({"cmd": "us_follow_config", "params": {"speed": speed}})
+
+                # ── Richiesta dati scansione dalla dashboard ──────────────────
+                elif data.get("type") == "us_get_scan_data":
+                    # Invia i dati dell'ultima scansione direttamente dalla cache server
+                    await ws.send_text(json.dumps({
+                        "type": "scan_data",
+                        "data": robot.us_scan_data,
+                        "points": len(robot.us_scan_data),
+                        "complete": not robot.us_scanning,
+                        "progress": robot.us_scan_progress,
+                    }))
 
     except WebSocketDisconnect:
         pass
@@ -1306,6 +1516,14 @@ async def status():
         "esp32_audio":   robot.audio_ws is not None,
         "esp32_cmd":     robot.cmd_ws is not None,
         "dashboard_cnt": len(robot.dashboard_ws),
+        "ultrasonic": {
+            "distance_cm":  robot.us_distance,
+            "obstacle":     robot.us_obstacle,
+            "mode":         robot.us_mode,
+            "scanning":     robot.us_scanning,
+            "scan_progress": robot.us_scan_progress,
+            "yaw":          robot.us_yaw,
+        },
     }
 
 

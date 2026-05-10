@@ -72,6 +72,25 @@ const char* WS_CMD_PATH    = "/cmd";
 #define BUMPER_RIGHT_PIN  GPIO_NUM_11
 #define BUMPER_DEBOUNCE_MS 50  // debounce software
 
+
+// ─── ULTRASUONI HC-SR04 ──────────────────────────────────────────────────────
+#define US_TRIG_PIN       GPIO_NUM_9
+#define US_ECHO_PIN       GPIO_NUM_10
+#define US_MAX_DISTANCE_CM    400   // oltre questo, consideriamo "nessun ostacolo"
+#define US_TIMEOUT_US         25000 // timeout echo (~4.3m)
+#define US_READ_INTERVAL_MS   50    // lettura ogni 50ms (20Hz)
+#define US_ANTICOLLISION_CM   20    // distanza minima anticollisione
+#define US_SLOWDOWN_CM        40    // distanza a cui rallentare
+#define US_FOLLOW_TARGET_CM   80    // distanza target follow-me
+#define US_FOLLOW_TOLERANCE   15    // ±15cm dal target = fermo
+#define US_FOLLOW_MAX_CM      200   // oltre questo, perso il target
+#define US_FOLLOW_MIN_CM      30    // troppo vicino, indietreggia
+#define US_SCAN_STEP_DEG      10    // gradi per step nella scansione 360
+#define US_SCAN_SETTLE_MS     150   // ms di attesa dopo rotazione per stabilizzare lettura
+#define US_MEDIAN_SAMPLES     3     // letture per mediana (più robusto)
+
+
+
 // ─── PARAMETRI AUDIO ─────────────────────────────────────────────────────────
 #define SAMPLE_RATE       16000
 #define BITS_PER_SAMPLE   16
@@ -187,6 +206,40 @@ volatile SensorState sensorState = {};
 SemaphoreHandle_t sensorMutex;
 
 
+// ─── STATO ULTRASUONI ────────────────────────────────────────────────────────
+enum UltrasonicMode { 
+  US_MODE_MONITOR,      // Solo monitoraggio distanza + anticollisione
+  US_MODE_FOLLOW,       // Follow-me
+  US_MODE_SCAN          // Scansione 360°
+};
+
+struct UltrasonicState {
+  float distanceCm;           // Ultima distanza misurata
+  float filteredDistanceCm;   // Distanza filtrata (media mobile)
+  bool  obstacleDetected;     // Ostacolo sotto soglia anticollisione
+  UltrasonicMode mode;        // Modalità corrente
+  
+  // Follow-me
+  bool followActive;
+  uint8_t followSpeed;
+  
+  // Scansione 360°
+  bool scanRequested;         // Flag: avvia scansione
+  bool scanInProgress;        // Scansione in corso
+  float scanData[36];         // Distanze ogni 10° (36 punti)
+  float scanAngles[36];       // Angoli reali (da IMU)
+  uint8_t scanPoints;         // Punti raccolti
+  bool scanComplete;          // Scansione completata, dati pronti
+  float scanStartYaw;         // Yaw iniziale dalla IMU
+};
+
+volatile UltrasonicState usState = {};
+SemaphoreHandle_t usMutex;
+
+// Heading (yaw) integrato dal giroscopio — aggiornato nel task sensori
+volatile float imuYawDeg = 0.0f;
+
+
 // ─── TTS con struct che include lunghezza ──────────────────────
 typedef struct {
   uint8_t* data;
@@ -224,6 +277,7 @@ TaskHandle_t taskSpeakerHandle = NULL;
 TaskHandle_t taskStatusHandle  = NULL;
 TaskHandle_t taskDisplayHandle = NULL;
 TaskHandle_t taskSensorsHandle = NULL;
+TaskHandle_t taskUltrasonicHandle = NULL;
 
 
 // ─── CODA COMANDI ────────────────────────────────────────────────────────────
@@ -245,6 +299,10 @@ TaskHandle_t taskCmdHandle = NULL;
 // ─── STATO MOTORI ────────────────────────────────────────────────────────────
 volatile bool motorsRunning = false;
 volatile uint32_t motorStopTime = 0;  // millis() a cui fermare (0 = no timeout)
+
+// Direzione corrente motori (per anticollisione intelligente)
+enum MotorDirection { MOT_DIR_STOP, MOT_DIR_FORWARD, MOT_DIR_BACKWARD, MOT_DIR_TURN };
+volatile MotorDirection motorDirection = MOT_DIR_STOP;
 
 // Bumper state
 volatile bool bumperLeftHit  = false;
@@ -268,6 +326,7 @@ void setupWebSockets();
 void setupSensors();
 void setupMotors();
 void setupBumpers();
+void setupUltrasonic();
 
 void taskSensors(void* param);
 void taskMic(void* param);
@@ -277,6 +336,7 @@ void taskCommandProcessor(void* param);
 void taskMotorWatchdog(void* param);
 void taskBumperMonitor(void* param);
 void taskDisplay(void* param);
+void taskUltrasonic(void* param);
 
 void handleCommand(const char* json);
 int16_t computeRMS(int16_t* samples, size_t count);
@@ -291,6 +351,11 @@ void motorForward(uint8_t speed);
 void motorBackward(uint8_t speed);
 void motorTurnLeft(uint8_t speed);
 void motorTurnRight(uint8_t speed);
+float usReadDistanceCm();
+float usReadMedianCm(uint8_t samples);
+void usAnticollisionCheck(float distCm);
+void usFollowMeLogic(float distCm);
+void usScan360();
 
 
 void wsAudioEvent(WStype_t type, uint8_t* payload, size_t length);
@@ -317,7 +382,8 @@ void setup() {
   setupI2S_Mic();
   setupI2S_Speaker();
   setupMotors();      
-  setupBumpers();     
+  setupBumpers();
+  setupUltrasonic();     
   setupWebSockets();
   setupSensors();
 
@@ -345,6 +411,7 @@ void setup() {
   xTaskCreatePinnedToCore(taskCommandProcessor, "CmdTask",  8192, NULL, 7, &taskCmdHandle,      0);
   xTaskCreatePinnedToCore(taskDisplay, "DispTask", 8192, NULL, 2, &taskDisplayHandle, 0);
   xTaskCreatePinnedToCore(taskSensors, "SensTask", 4096, NULL, 2, &taskSensorsHandle, 0);
+  xTaskCreatePinnedToCore(taskUltrasonic, "USTask", 8192, NULL, 5, &taskUltrasonicHandle, 0);
 
 
   setLedColor(0, 5, 0); // verde: pronto
@@ -505,6 +572,450 @@ void setupBumpers() {
   pinMode(BUMPER_RIGHT_PIN, INPUT_PULLDOWN);
   Serial.println("[BUMP] Bumper pronti (pulldown interno) .");
 }
+
+// ─── SETUP ULTRASUONI ────────────────────────────────────────────────────────
+void setupUltrasonic() {
+  pinMode(US_TRIG_PIN, OUTPUT);
+  pinMode(US_ECHO_PIN, INPUT);
+  digitalWrite(US_TRIG_PIN, LOW);
+  
+  usMutex = xSemaphoreCreateMutex();
+  
+  // Inizializza stato
+  memset((void*)&usState, 0, sizeof(UltrasonicState));
+  usState.mode = US_MODE_MONITOR;
+  for (int i = 0; i < 36; i++) usState.scanData[i] = -1.0f;
+  
+  Serial.println("[US] HC-SR04 pronto (Trig=GPIO9, Echo=GPIO10).");
+}
+
+// ─── LETTURA DISTANZA (singola, non bloccante per il task) ───────────────────
+float usReadDistanceCm() {
+  // Trigger pulse: 10µs HIGH
+  digitalWrite(US_TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(US_TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(US_TRIG_PIN, LOW);
+  
+  // Misura durata echo
+  unsigned long duration = pulseIn(US_ECHO_PIN, HIGH, US_TIMEOUT_US);
+  
+  if (duration == 0) {
+    return -1.0f;  // Nessun echo (fuori range o errore)
+  }
+  
+  // Velocità suono ~343 m/s → 0.0343 cm/µs → andata+ritorno /2
+  float distance = (duration * 0.0343f) / 2.0f;
+  
+  if (distance > US_MAX_DISTANCE_CM) {
+    return -1.0f;
+  }
+  
+  return distance;
+}
+
+// ─── LETTURA CON MEDIANA (più robusta) ───────────────────────────────────────
+float usReadMedianCm(uint8_t samples) {
+  float readings[samples];
+  uint8_t validCount = 0;
+  
+  for (uint8_t i = 0; i < samples; i++) {
+    float d = usReadDistanceCm();
+    if (d > 0) {
+      readings[validCount++] = d;
+    }
+    if (i < samples - 1) delayMicroseconds(2500); // pausa tra letture
+  }
+  
+  if (validCount == 0) return -1.0f;
+  
+  // Bubble sort per mediana (array piccolo, OK)
+  for (uint8_t i = 0; i < validCount - 1; i++) {
+    for (uint8_t j = 0; j < validCount - i - 1; j++) {
+      if (readings[j] > readings[j + 1]) {
+        float tmp = readings[j];
+        readings[j] = readings[j + 1];
+        readings[j + 1] = tmp;
+      }
+    }
+  }
+  
+  return readings[validCount / 2];
+}
+
+// ─── ANTICOLLISIONE ──────────────────────────────────────────────────────────
+/*
+ * Integra con i bumper: gli ultrasuoni fermano il robot PRIMA dell'impatto.
+ * I bumper restano come ultima linea di difesa (contatto fisico).
+ */
+void usAnticollisionCheck(float distCm) {
+  if (distCm < 0) return;  // Lettura non valida, non agire
+  
+  if (!motorsRunning || motorDirection != MOT_DIR_FORWARD) return;  // Motori fermi, niente da fare
+  
+  // Controlla solo se il robot sta andando AVANTI
+  // (non bloccare retromarcia o rotazioni)
+  // Leggiamo i registri PWM per capire la direzione
+  // Semplificazione: usiamo un flag globale
+  
+  if (distCm <= US_ANTICOLLISION_CM) {
+    // STOP IMMEDIATO — ostacolo troppo vicino
+    Serial.printf("[US] ⚠️ ANTICOLLISIONE! Distanza: %.1f cm\n", distCm);
+    motorStop();
+    
+    // Feedback visivo
+    userLedOverride = true;
+    userLedOverrideUntil = millis() + 2000;
+    setLedColor(255, 50, 0);  // arancione
+    
+    // Notifica server
+    if (wsCmdConnected) {
+      char payload[128];
+      snprintf(payload, sizeof(payload),
+        "{\"event\":\"us_anticollision\",\"distance_cm\":%.1f}", distCm);
+      wsCmd.sendTXT(payload);
+    }
+    
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    usState.obstacleDetected = true;
+    xSemaphoreGive(usMutex);
+  } else if (distCm <= US_SLOWDOWN_CM) {
+    // Zona di rallentamento — potremmo ridurre la velocità
+    // Per ora solo segnalazione (il server può decidere)
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    usState.obstacleDetected = false;
+    xSemaphoreGive(usMutex);
+  } else {
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    usState.obstacleDetected = false;
+    xSemaphoreGive(usMutex);
+  }
+}
+
+// ─── FOLLOW-ME ───────────────────────────────────────────────────────────────
+/*
+ * Con un solo sensore frontale:
+ *   - Se oggetto nel range target ± tolleranza → fermo
+ *   - Se oggetto più lontano del target → avanti
+ *   - Se oggetto più vicino del minimo → indietro
+ *   - Se nessun oggetto rilevato → fermo (target perso)
+ *
+ * Limitazione: non può seguire lateralmente. Il server/LLM può integrare
+ * con rotazioni periodiche per "cercare" il target.
+ */
+void usFollowMeLogic(float distCm) {
+  if (distCm < 0 || distCm > US_FOLLOW_MAX_CM) {
+    // Target perso
+    if (motorsRunning) {
+      motorStop();
+      Serial.println("[US-FOLLOW] Target perso, stop.");
+      if (wsCmdConnected) {
+        wsCmd.sendTXT("{\"event\":\"follow_target_lost\"}");
+      }
+    }
+    return;
+  }
+  
+  uint8_t speed = usState.followSpeed > 0 ? usState.followSpeed : 120;
+  
+  if (distCm < US_FOLLOW_MIN_CM) {
+    // Troppo vicino — indietreggia
+    motorBackward(speed / 2);
+  } else if (distCm < (US_FOLLOW_TARGET_CM - US_FOLLOW_TOLERANCE)) {
+    // Sotto il target — indietreggia piano
+    motorBackward(speed / 3);
+  } else if (distCm > (US_FOLLOW_TARGET_CM + US_FOLLOW_TOLERANCE)) {
+    // Oltre il target — avvicinati
+    // Velocità proporzionale alla distanza
+    uint8_t dynSpeed = map(constrain((int)distCm, US_FOLLOW_TARGET_CM, US_FOLLOW_MAX_CM),
+                           US_FOLLOW_TARGET_CM, US_FOLLOW_MAX_CM,
+                           speed / 2, speed);
+    motorForward(dynSpeed);
+  } else {
+    // Nel range — fermo
+    if (motorsRunning) {
+      motorStop();
+    }
+  }
+}
+
+// ─── SCANSIONE 360° ─────────────────────────────────────────────────────────
+/*
+ * Ruota il robot sul posto di 360° a step di US_SCAN_STEP_DEG,
+ * leggendo la distanza ad ogni step.
+ * Usa il giroscopio (imuYawDeg) per sapere l'angolo reale.
+ *
+ * NOTA: Questa funzione è BLOCCANTE per il task ultrasuoni.
+ * Durante la scansione, l'anticollisione è sospesa.
+ */
+void usScan360() {
+  Serial.println("[US-SCAN] Avvio scansione 360°...");
+  
+  xSemaphoreTake(usMutex, portMAX_DELAY);
+  usState.scanInProgress = true;
+  usState.scanComplete = false;
+  usState.scanPoints = 0;
+  usState.scanStartYaw = imuYawDeg;
+  xSemaphoreGive(usMutex);
+  
+  // Notifica server
+  if (wsCmdConnected) {
+    wsCmd.sendTXT("{\"event\":\"scan_started\"}");
+  }
+  
+  // Feedback display
+  display.showText("Scansione", "360 gradi...", "", "", 1, 0);
+  
+  int totalSteps = 360 / US_SCAN_STEP_DEG;  // 36 step
+  float startYaw = imuYawDeg;
+  
+  for (int step = 0; step < totalSteps; step++) {
+    // Angolo target per questo step
+    float targetAngle = startYaw + (step * US_SCAN_STEP_DEG);
+    // Normalizza a 0-360
+    while (targetAngle >= 360.0f) targetAngle -= 360.0f;
+    while (targetAngle < 0.0f) targetAngle += 360.0f;
+    
+    // Ruota fino all'angolo target
+    float currentYaw = imuYawDeg;
+    float angleDiff = targetAngle - currentYaw;
+    // Normalizza differenza a -180..+180
+    while (angleDiff > 180.0f) angleDiff -= 360.0f;
+    while (angleDiff < -180.0f) angleDiff += 360.0f;
+    
+    if (step > 0) {  // Il primo step è la posizione corrente
+      // Ruota nella direzione giusta
+      if (angleDiff > 0) {
+        motorTurnRight(100);
+      } else {
+        motorTurnLeft(100);
+      }
+      
+            // Attendi di raggiungere l'angolo (con timeout)
+      uint32_t rotStart = millis();
+      while (millis() - rotStart < 2000) {  // max 2s per step
+        currentYaw = imuYawDeg;
+        float remaining = targetAngle - currentYaw;
+        while (remaining > 180.0f) remaining -= 360.0f;
+        while (remaining < -180.0f) remaining += 360.0f;
+        
+        if (fabsf(remaining) < 3.0f) {  // ±3° di tolleranza
+          break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
+      
+      motorStop();
+      vTaskDelay(pdMS_TO_TICKS(US_SCAN_SETTLE_MS));  // Attendi stabilizzazione
+    }
+    
+    // Leggi distanza (mediana per robustezza)
+    float dist = usReadMedianCm(US_MEDIAN_SAMPLES);
+    float actualAngle = imuYawDeg;
+    
+    // Salva nel buffer
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    usState.scanData[step] = dist;
+    usState.scanAngles[step] = actualAngle;
+    usState.scanPoints = step + 1;
+    xSemaphoreGive(usMutex);
+    
+    // Invia punto al server in tempo reale (per aggiornamento live sulla dashboard)
+    if (wsCmdConnected) {
+      char payload[128];
+      snprintf(payload, sizeof(payload),
+        "{\"event\":\"scan_point\",\"step\":%d,\"angle\":%.1f,\"distance\":%.1f}",
+        step, actualAngle, dist);
+      wsCmd.sendTXT(payload);
+    }
+    
+    // Aggiorna progress sul display
+    uint8_t pct = (uint8_t)((step + 1) * 100 / totalSteps);
+    display.showProgress(pct, "Scansione...", 0);
+    
+    Serial.printf("[US-SCAN] Step %d/%d: angolo=%.1f° dist=%.1f cm\n",
+                  step + 1, totalSteps, actualAngle, dist);
+  }
+  
+  // Scansione completata — torna alla posizione iniziale (opzionale)
+  float returnDiff = startYaw - imuYawDeg;
+  while (returnDiff > 180.0f) returnDiff -= 360.0f;
+  while (returnDiff < -180.0f) returnDiff += 360.0f;
+  
+  if (fabsf(returnDiff) > 5.0f) {
+    if (returnDiff > 0) motorTurnRight(100);
+    else motorTurnLeft(100);
+    
+    uint32_t retStart = millis();
+    while (millis() - retStart < 3000) {
+      float rem = startYaw - imuYawDeg;
+      while (rem > 180.0f) rem -= 360.0f;
+      while (rem < -180.0f) rem += 360.0f;
+      if (fabsf(rem) < 3.0f) break;
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    motorStop();
+  }
+  
+  // Marca come completata
+  xSemaphoreTake(usMutex, portMAX_DELAY);
+  usState.scanInProgress = false;
+  usState.scanComplete = true;
+  xSemaphoreGive(usMutex);
+  
+  // Invia dati completi al server
+  if (wsCmdConnected) {
+    // Invia come array JSON compatto
+    char header[64];
+    snprintf(header, sizeof(header),
+      "{\"event\":\"scan_complete\",\"points\":%d,\"data\":[", totalSteps);
+    
+    // Costruisci il payload completo (max ~1200 byte per 36 punti)
+    char fullPayload[1400];
+    strcpy(fullPayload, header);
+    
+    for (int i = 0; i < totalSteps; i++) {
+      char point[40];
+      snprintf(point, sizeof(point), "{\"a\":%.1f,\"d\":%.1f}%s",
+        usState.scanAngles[i], usState.scanData[i],
+        (i < totalSteps - 1) ? "," : "");
+      strcat(fullPayload, point);
+    }
+    strcat(fullPayload, "]}");
+    
+    wsCmd.sendTXT(fullPayload);
+  }
+  
+  // Torna agli occhi
+  display.showEyes();
+  Serial.println("[US-SCAN] Scansione completata!");
+}
+
+
+// ─── TASK: ULTRASUONI ────────────────────────────────────────────────────────
+/*
+ * Task dedicato per HC-SR04.
+ * Gestisce:
+ *   - Lettura periodica distanza (20Hz)
+ *   - Anticollisione (sempre attiva in MONITOR mode)
+ *   - Follow-me (quando attivato)
+ *   - Scansione 360° (su richiesta)
+ *
+ * Priorità 5: alta come il microfono (sicurezza!)
+ */
+void taskUltrasonic(void* param) {
+  Serial.println("[US Task] Avviato.");
+  
+  uint32_t lastReadMs = 0;
+  uint32_t lastReportMs = 0;
+  
+  // Buffer per media mobile (filtro rumore)
+  float distHistory[5] = {0};
+  uint8_t histIdx = 0;
+  uint8_t validReadings = 0;
+  
+  for (;;) {
+    uint32_t now = millis();
+    
+    // ── Controlla se è richiesta una scansione ───────────────────────────
+    bool doScan = false;
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    if (usState.scanRequested) {
+      usState.scanRequested = false;
+      doScan = true;
+    }
+    xSemaphoreGive(usMutex);
+    
+    if (doScan) {
+      usScan360();
+      continue;  // Dopo la scansione, riprendi il loop normale
+    }
+    
+    // ── Lettura periodica ────────────────────────────────────────────────
+    if (now - lastReadMs >= US_READ_INTERVAL_MS) {
+      lastReadMs = now;
+      
+      float rawDist = usReadDistanceCm();
+      
+      // Filtraggio: media mobile sulle letture valide
+      float filteredDist = rawDist;
+      if (rawDist > 0) {
+        distHistory[histIdx] = rawDist;
+        histIdx = (histIdx + 1) % 5;
+        if (validReadings < 5) validReadings++;
+        
+        // Calcola media (escludendo valori non validi)
+        float sum = 0;
+        uint8_t cnt = 0;
+        for (uint8_t i = 0; i < validReadings; i++) {
+          if (distHistory[i] > 0) {
+            sum += distHistory[i];
+            cnt++;
+          }
+        }
+        filteredDist = (cnt > 0) ? (sum / cnt) : rawDist;
+      }
+      
+      // Aggiorna stato condiviso
+      xSemaphoreTake(usMutex, portMAX_DELAY);
+      usState.distanceCm = rawDist;
+      usState.filteredDistanceCm = filteredDist;
+      UltrasonicMode currentMode = usState.mode;
+      xSemaphoreGive(usMutex);
+      
+      // ── Logica in base alla modalità ───────────────────────────────────
+      switch (currentMode) {
+        case US_MODE_MONITOR:
+          // Anticollisione sempre attiva
+          usAnticollisionCheck(filteredDist);
+          break;
+          
+        case US_MODE_FOLLOW:
+          // Follow-me (include anticollisione implicita)
+          usFollowMeLogic(filteredDist);
+          break;
+          
+        case US_MODE_SCAN:
+          // La scansione è gestita sopra con scanRequested
+          break;
+      }
+    }
+    
+    // ── Report periodico al server (ogni 500ms) ─────────────────────────
+    if (now - lastReportMs >= 500) {
+      lastReportMs = now;
+      
+      if (wsCmdConnected) {
+        xSemaphoreTake(usMutex, portMAX_DELAY);
+        float dist = usState.filteredDistanceCm;
+        float rawDist = usState.distanceCm;
+        bool obstacle = usState.obstacleDetected;
+        UltrasonicMode mode = usState.mode;
+        bool scanning = usState.scanInProgress;
+        xSemaphoreGive(usMutex);
+        
+        char payload[200];
+        snprintf(payload, sizeof(payload),
+          "{\"event\":\"us_data\","
+          "\"distance_cm\":%.1f,\"raw_cm\":%.1f,"
+          "\"obstacle\":%s,\"mode\":\"%s\",\"scanning\":%s}",
+          dist, rawDist,
+          obstacle ? "true" : "false",
+          mode == US_MODE_MONITOR ? "monitor" : 
+            (mode == US_MODE_FOLLOW ? "follow" : "scan"),
+          scanning ? "true" : "false");
+        
+        wsCmd.sendTXT(payload);
+      }
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+
+
 
 // ─── WEBSOCKET SETUP ─────────────────────────────────────────────────────────
 void setupWebSockets() {
@@ -695,7 +1206,7 @@ void handleCommand(const char* json) {
     wsCmd.sendTXT("{\"ack\":\"set_led_off\"}");
   }
 
-    // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   // DISPLAY
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -950,6 +1461,138 @@ void handleCommand(const char* json) {
   else if (strcmp(cmd, "ping") == 0) {
     wsCmd.sendTXT("{\"ack\":\"pong\"}");
   }
+
+    // ══════════════════════════════════════════════════════════════════════════
+  // ULTRASUONI
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // ── us_get_distance ───────────────────────────────────────────────────────
+  // {"cmd":"us_get_distance"}
+  else if (strcmp(cmd, "us_get_distance") == 0) {
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    float dist = usState.filteredDistanceCm;
+    float raw = usState.distanceCm;
+    bool obstacle = usState.obstacleDetected;
+    xSemaphoreGive(usMutex);
+    
+    char ack[128];
+    snprintf(ack, sizeof(ack),
+      "{\"ack\":\"us_get_distance\",\"distance_cm\":%.1f,\"raw_cm\":%.1f,\"obstacle\":%s}",
+      dist, raw, obstacle ? "true" : "false");
+    wsCmd.sendTXT(ack);
+  }
+
+  // ── us_set_mode ───────────────────────────────────────────────────────────
+  // {"cmd":"us_set_mode","params":{"mode":"monitor|follow|scan"}}
+  else if (strcmp(cmd, "us_set_mode") == 0) {
+    const char* modeStr = doc["params"]["mode"].as<const char*>();
+    if (modeStr) {
+      xSemaphoreTake(usMutex, portMAX_DELAY);
+      if (strcmp(modeStr, "monitor") == 0) {
+        usState.mode = US_MODE_MONITOR;
+        usState.followActive = false;
+      } else if (strcmp(modeStr, "follow") == 0) {
+        usState.mode = US_MODE_FOLLOW;
+        usState.followActive = true;
+        usState.followSpeed = doc["params"]["speed"] | 120;
+      } else if (strcmp(modeStr, "scan") == 0) {
+        usState.mode = US_MODE_MONITOR;  // Torna a monitor dopo scan
+        usState.scanRequested = true;
+      }
+      xSemaphoreGive(usMutex);
+      
+      char ack[80];
+      snprintf(ack, sizeof(ack), "{\"ack\":\"us_set_mode\",\"mode\":\"%s\"}", modeStr);
+      wsCmd.sendTXT(ack);
+    }
+  }
+
+  // ── us_set_thresholds ─────────────────────────────────────────────────────
+  // {"cmd":"us_set_thresholds","params":{"anticollision_cm":25,"slowdown_cm":50}}
+  else if (strcmp(cmd, "us_set_thresholds") == 0) {
+    // Per ora usiamo le costanti, ma potremmo renderle variabili
+    // Questo comando è un placeholder per futura configurabilità
+    wsCmd.sendTXT("{\"ack\":\"us_set_thresholds\",\"note\":\"using compile-time defaults\"}");
+  }
+
+  // ── us_scan ───────────────────────────────────────────────────────────────
+  // {"cmd":"us_scan"} — shortcut per avviare scansione
+  else if (strcmp(cmd, "us_scan") == 0) {
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    usState.scanRequested = true;
+    xSemaphoreGive(usMutex);
+    wsCmd.sendTXT("{\"ack\":\"us_scan\",\"status\":\"started\"}");
+  }
+
+  // ── us_follow_config ──────────────────────────────────────────────────────
+  // {"cmd":"us_follow_config","params":{"target_cm":100,"speed":130}}
+  else if (strcmp(cmd, "us_follow_config") == 0) {
+    // Nota: per renderli dinamici, dovremmo usare variabili invece di #define
+    // Per ora logghiamo e usiamo i default
+    uint8_t speed = doc["params"]["speed"] | 120;
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    usState.followSpeed = speed;
+    xSemaphoreGive(usMutex);
+    
+    char ack[80];
+    snprintf(ack, sizeof(ack), "{\"ack\":\"us_follow_config\",\"speed\":%d}", speed);
+    wsCmd.sendTXT(ack);
+  }
+
+    // ── us_get_scan_data ──────────────────────────────────────────────────────
+  // {"cmd":"us_get_scan_data"} — richiedi ultimi dati scansione
+  else if (strcmp(cmd, "us_get_scan_data") == 0) {
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    bool hasData = usState.scanComplete;
+    uint8_t points = usState.scanPoints;
+    xSemaphoreGive(usMutex);
+    
+    if (!hasData || points == 0) {
+      wsCmd.sendTXT("{\"ack\":\"us_get_scan_data\",\"available\":false}");
+    } else {
+      // Invia i dati (stessa logica di scan_complete)
+      char fullPayload[1400];
+      snprintf(fullPayload, sizeof(fullPayload),
+        "{\"ack\":\"us_get_scan_data\",\"available\":true,\"points\":%d,\"data\":[", points);
+      
+      xSemaphoreTake(usMutex, portMAX_DELAY);
+      for (int i = 0; i < points; i++) {
+        char point[40];
+        snprintf(point, sizeof(point), "{\"a\":%.1f,\"d\":%.1f}%s",
+          usState.scanAngles[i], usState.scanData[i],
+          (i < points - 1) ? "," : "");
+        strcat(fullPayload, point);
+      }
+      xSemaphoreGive(usMutex);
+      
+      strcat(fullPayload, "]}");
+      wsCmd.sendTXT(fullPayload);
+    }
+  }
+
+  // ── us_stop_follow ────────────────────────────────────────────────────────
+  // {"cmd":"us_stop_follow"} — ferma follow-me e torna a monitor
+  else if (strcmp(cmd, "us_stop_follow") == 0) {
+    xSemaphoreTake(usMutex, portMAX_DELAY);
+    usState.mode = US_MODE_MONITOR;
+    usState.followActive = false;
+    xSemaphoreGive(usMutex);
+    motorStop();
+    wsCmd.sendTXT("{\"ack\":\"us_stop_follow\"}");
+  }
+
+  // ── us_calibrate_yaw ──────────────────────────────────────────────────────
+  // {"cmd":"us_calibrate_yaw"} — resetta lo yaw a 0 (posizione corrente = nord)
+  else if (strcmp(cmd, "us_calibrate_yaw") == 0) {
+    imuYawDeg = 0.0f;
+    wsCmd.sendTXT("{\"ack\":\"us_calibrate_yaw\",\"yaw\":0}");
+    Serial.println("[US] Yaw resettato a 0°.");
+  }
+
+
+
+
+
 
   // ── sconosciuto ───────────────────────────────────────────────────────────
   else {
@@ -1364,13 +2007,32 @@ void motorStop() {
   motorSetRight(0);
   motorsRunning = false;
   motorStopTime = 0;
+  motorDirection = MOT_DIR_STOP;
   Serial.println("[MOT] Stop.");
 }
 
 void motorForward(uint8_t speed) {
+  // Check preventivo ultrasuoni prima di partire
+  xSemaphoreTake(usMutex, portMAX_DELAY);
+  float dist = usState.filteredDistanceCm;
+  bool obstacle = usState.obstacleDetected;
+  xSemaphoreGive(usMutex);
+  
+  if (obstacle || (dist > 0 && dist <= US_ANTICOLLISION_CM)) {
+    Serial.printf("[MOT] Avanti BLOCCATO — ostacolo a %.1f cm!\n", dist);
+    if (wsCmdConnected) {
+      char payload[128];
+      snprintf(payload, sizeof(payload),
+        "{\"event\":\"move_blocked\",\"reason\":\"obstacle\",\"distance_cm\":%.1f}", dist);
+      wsCmd.sendTXT(payload);
+    }
+    return;  // Non muovere!
+  }
+
   motorSetLeft(speed);
   motorSetRight(speed);
   motorsRunning = true;
+  motorDirection = MOT_DIR_FORWARD;
   Serial.printf("[MOT] Avanti @ %d\n", speed);
 }
 
@@ -1378,6 +2040,7 @@ void motorBackward(uint8_t speed) {
   motorSetLeft(-speed);
   motorSetRight(-speed);
   motorsRunning = true;
+  motorDirection = MOT_DIR_BACKWARD;
   Serial.printf("[MOT] Indietro @ %d\n", speed);
 }
 
@@ -1386,6 +2049,7 @@ void motorTurnLeft(uint8_t speed) {
   motorSetLeft(-speed);
   motorSetRight(speed);
   motorsRunning = true;
+  motorDirection = MOT_DIR_TURN;
   Serial.printf("[MOT] Gira sinistra @ %d\n", speed);
 }
 
@@ -1394,6 +2058,7 @@ void motorTurnRight(uint8_t speed) {
   motorSetLeft(speed);
   motorSetRight(-speed);
   motorsRunning = true;
+  motorDirection = MOT_DIR_TURN;
   Serial.printf("[MOT] Gira destra @ %d\n", speed);
 }
 
@@ -1596,6 +2261,17 @@ void taskSensors(void* param) {
       float gy = gyr.y;
       float gz = gyr.z;
 
+      // ── INTEGRAZIONE YAW (per scansione 360°) ─────────────────────────
+      // Integra il giroscopio Z per ottenere l'heading approssimato
+      // dt = SENSOR_READ_INTERVAL_MS / 1000.0
+      float dt = SENSOR_READ_INTERVAL_MS / 1000.0f;
+      imuYawDeg += gz * dt;
+      // Normalizza a 0-360
+      while (imuYawDeg >= 360.0f) imuYawDeg -= 360.0f;
+      while (imuYawDeg < 0.0f) imuYawDeg += 360.0f;
+
+
+
       // Magnitudine accelerazione totale
       float accelMag = sqrtf(ax * ax + ay * ay + az * az);
 
@@ -1777,11 +2453,13 @@ void taskSensors(void* param) {
           "\"accel\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"mag\":%.2f},"
           "\"gyro\":{\"x\":%.1f,\"y\":%.1f,\"z\":%.1f},"
           "\"tilt\":{\"x\":%.1f,\"y\":%.1f},"
+          "\"yaw\":%.1f,"
            "\"state\":{\"tap\":%s,\"tilt\":%s,\"freefall\":%s}}",
           temp, press,
           ax, ay, az, mag,
           gx, gy, gz,
           tiltX, tiltY,
+          imuYawDeg,
           sensorState.tapDetected ? "true" : "false",
           sensorState.tiltAlert ? "true" : "false",
           sensorState.freefallDetected ? "true" : "false");

@@ -585,6 +585,195 @@
     animation: robot-freefall 0.6s ease-in-out;
   }
   
+    /* ─── ULTRASUONI ─────────────────────────────── */
+  .us-distance-display {
+    font-family: var(--mono);
+    font-size: 32px;
+    color: var(--accent);
+    text-align: center;
+    text-shadow: var(--glow);
+    margin: 8px 0;
+    transition: color 0.3s;
+  }
+  .us-distance-display.danger {
+    color: var(--accent2);
+    text-shadow: 0 0 12px var(--accent2);
+    animation: blink-badge 0.5s steps(1) infinite;
+  }
+  .us-distance-display.warning {
+    color: #ffcc00;
+    text-shadow: 0 0 12px #ffcc00;
+  }
+  .us-distance-display.clear {
+    color: var(--accent3);
+    text-shadow: 0 0 12px var(--accent3);
+  }
+
+  .us-bar-container {
+    width: 100%;
+    height: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 6px 0;
+  }
+  .us-bar {
+    height: 100%;
+    background: var(--accent3);
+    border-radius: 6px;
+    transition: width 0.2s, background 0.2s;
+  }
+  .us-bar.danger { background: var(--accent2); }
+  .us-bar.warning { background: #ffcc00; }
+
+  .us-mode-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    text-transform: uppercase;
+    display: inline-block;
+    transition: all 0.3s;
+  }
+  .us-mode-badge.monitor { color: var(--accent3); border-color: var(--accent3); }
+  .us-mode-badge.follow { color: #ff9f43; border-color: #ff9f43; }
+  .us-mode-badge.scan { color: var(--accent); border-color: var(--accent); animation: blink-badge 1s steps(1) infinite; }
+
+  /* ─── RADAR MAP ──────────────────────────────── */
+  .radar-container {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+    aspect-ratio: 1;
+    margin: 0 auto;
+  }
+  .radar-canvas {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: radial-gradient(circle, var(--bg) 0%, #050810 100%);
+  }
+  .radar-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+  .radar-legend {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-dim);
+  }
+  .radar-legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  .scan-progress-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--bg);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .scan-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+    width: 0%;
+  }
+
+  .map-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .map-actions .btn {
+    flex: 1;
+    min-width: 80px;
+    font-size: 10px;
+    padding: 6px 8px;
+  }
+
+  /* Saved maps list */
+  .saved-maps-list {
+    max-height: 120px;
+    overflow-y: auto;
+    margin-top: 8px;
+  }
+  .saved-map-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .saved-map-item:hover {
+    background: var(--dim);
+    color: var(--accent);
+  }
+  .saved-map-item .map-name { flex: 1; }
+  .saved-map-item .map-date { color: var(--text-dim); font-size: 9px; }
+
+  /* Yaw compass */
+  .yaw-compass {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    position: relative;
+    margin: 0 auto;
+  }
+  .yaw-needle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 2px;
+    height: 24px;
+    background: var(--accent);
+    transform-origin: bottom center;
+    transform: translate(-50%, -100%) rotate(0deg);
+    border-radius: 1px;
+    transition: transform 0.2s;
+  }
+  .yaw-needle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -3px;
+    width: 8px;
+    height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+  
+  
+  
+  
   
 
   /* ─── SCROLLBAR ──────────────────────────────── */
@@ -598,6 +787,13 @@
     .twin-panel { grid-column: 1 / 3; }
     .log-panel  { grid-column: 1 / 3; }
   }
+  
+  
+  
+  
+  
+  
+  
 </style>
 </head>
 <body>
@@ -725,7 +921,7 @@
     </div>
 	
 	
-	    <!-- Sensori IMU -->
+	<!-- Sensori IMU -->
     <div style="width:100%;max-width:400px;">
       <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);text-align:center;margin-bottom:8px;letter-spacing:2px;">IMU + ENV SENSORS</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -767,7 +963,78 @@
       </div>
     </div>
 	
-	
+	    <!-- Ultrasuoni + Radar Map -->
+    <div style="width:100%;max-width:420px;">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);text-align:center;margin-bottom:8px;letter-spacing:2px;">ULTRASONIC HC-SR04</div>
+      
+      <!-- Distanza + Barra -->
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div class="us-distance-display" id="us-distance">— cm</div>
+            <div class="us-bar-container">
+              <div class="us-bar" id="us-bar" style="width:0%"></div>
+            </div>
+          </div>
+          <div style="text-align:center;">
+            <div class="yaw-compass" id="yaw-compass">
+              <div class="yaw-needle" id="yaw-needle"></div>
+            </div>
+            <div style="font-family:var(--mono);font-size:9px;color:var(--text-dim);margin-top:4px;">YAW: <span id="us-yaw-val">0°</span></div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+          <span class="us-mode-badge monitor" id="us-mode-badge">MONITOR</span>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim);" id="us-obstacle-ind">✓ Via libera</span>
+        </div>
+      </div>
+
+      <!-- Radar Map -->
+      <div style="margin-top:16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:2px;">RADAR MAP 360°</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text-dim);" id="scan-status">Nessuna scansione</div>
+        </div>
+        
+        <!-- Progress bar scansione -->
+        <div class="scan-progress-bar" id="scan-progress-container" style="display:none;">
+          <div class="scan-progress-fill" id="scan-progress-fill"></div>
+        </div>
+
+        <!-- Canvas radar -->
+        <div class="radar-container">
+          <canvas class="radar-canvas" id="radar-canvas" width="400" height="400"></canvas>
+        </div>
+
+        <!-- Legenda -->
+        <div class="radar-legend">
+          <span><span class="radar-legend-dot" style="background:var(--accent2);"></span>Ostacolo</span>
+          <span><span class="radar-legend-dot" style="background:var(--accent3);"></span>Libero</span>
+          <span><span class="radar-legend-dot" style="background:var(--accent);"></span>Robot</span>
+        </div>
+
+        <!-- Azioni mappa -->
+        <div class="map-actions">
+          <button class="btn btn-primary" onclick="startScan()">▶ SCAN 360°</button>
+          <button class="btn" onclick="requestDistance()">📏 MISURA</button>
+          <button class="btn" onclick="saveMap()">💾 SALVA</button>
+          <button class="btn" onclick="exportMapImage()">🖼️ EXPORT IMG</button>
+        </div>
+        <div class="map-actions">
+          <button class="btn" onclick="calibrateYaw()">🧭 RESET YAW</button>
+          <button class="btn" onclick="clearMap()">🗑️ CLEAR</button>
+          <button class="btn" onclick="toggleSavedMaps()">📂 MAPPE</button>
+        </div>
+
+        <!-- Lista mappe salvate -->
+        <div id="saved-maps-panel" style="display:none;margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text-dim);letter-spacing:1px;margin-bottom:4px;">MAPPE SALVATE</div>
+          <div class="saved-maps-list" id="saved-maps-list">
+            <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);padding:8px;text-align:center;">Nessuna mappa salvata</div>
+          </div>
+        </div>
+      </div>
+    </div>
 	
   </div>
 
@@ -909,6 +1176,40 @@
       </div>
     </div>
 
+	    <!-- ULTRASUONI -->
+    <div class="cmd-section">
+      <div class="cmd-section-label">Ultrasuoni</div>
+      
+      <!-- Mode selector -->
+      <div style="margin-bottom:8px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text-dim);margin-bottom:4px;">MODALITÀ</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="us-btn-monitor" onclick="setUsMode('monitor')">📡 Monitor</button>
+          <button class="btn" id="us-btn-follow" onclick="setUsMode('follow')">🚶 Follow</button>
+          <button class="btn" id="us-btn-scan" onclick="startScan()">🔄 Scan</button>
+        </div>
+      </div>
+
+      <!-- Follow config -->
+      <div id="follow-config" style="display:none;margin-bottom:8px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text-dim);margin-bottom:4px;">FOLLOW-ME CONFIG</div>
+        <div class="slider-row motor-slider">
+          <label>SPD</label>
+          <input type="range" min="60" max="255" value="120" id="sl-follow-speed" oninput="updateFollowConfig()">
+          <span class="slider-val" id="sv-follow-speed">120</span>
+        </div>
+        <div class="btn-row" style="margin-top:6px;">
+          <button class="btn btn-danger" onclick="stopFollow()">■ STOP FOLLOW</button>
+        </div>
+      </div>
+
+      <!-- Quick actions -->
+      <div class="btn-row">
+        <button class="btn" onclick="requestDistance()">📏 Distanza</button>
+        <button class="btn" onclick="calibrateYaw()">🧭 Reset Yaw</button>
+      </div>
+    </div>
+
     <!-- Connessione -->
     <div class="cmd-section">
       <div class="cmd-section-label">Server WS</div>
@@ -941,6 +1242,22 @@ let vuAnimId   = null;
 let vuActive   = false;
 let motorHoldMode = false;  // true quando DUR=0 (muovi finché tieni premuto)
 
+
+// ─── STATO ULTRASUONI ─────────────────────────────────
+let usDistance = -1;
+let usRawDistance = -1;
+let usObstacle = false;
+let usMode = 'monitor';
+let usScanning = false;
+let usScanProgress = 0;
+let usScanData = [];       // [{a: angolo, d: distanza}, ...]
+let usYaw = 0;
+let savedMaps = [];        // Mappe salvate in localStorage
+
+// Carica mappe salvate
+try {
+  savedMaps = JSON.parse(localStorage.getItem('robot_maps') || '[]');
+} catch(e) { savedMaps = []; }
 
 const SWATCHES = [
   { name: 'Rosso',    r: 255, g:  0,  b:  0 },
@@ -1036,6 +1353,21 @@ function handleMessage(data) {
     setDotState('dot-cmd',   data.esp32_cmd);
     document.getElementById('st-esp-audio').textContent = data.esp32_audio ? 'OK' : '—';
     document.getElementById('st-esp-cmd').textContent   = data.esp32_cmd   ? 'OK' : '—';
+	// Inizializza dati ultrasuoni
+    if (data.ultrasonic) {
+      usDistance = data.ultrasonic.distance_cm || -1;
+      usObstacle = data.ultrasonic.obstacle || false;
+      usMode = data.ultrasonic.mode || 'monitor';
+      usScanning = data.ultrasonic.scanning || false;
+      usScanProgress = data.ultrasonic.scan_progress || 0;
+      usYaw = data.ultrasonic.yaw || 0;
+      if (data.ultrasonic.scan_data && data.ultrasonic.scan_data.length > 0) {
+        usScanData = data.ultrasonic.scan_data;
+      }
+      updateUltrasonicDisplay(data.ultrasonic);
+      updateUsModeBadge(usMode);
+      drawRadarMap();
+    }
     log('init', 'Stato iniziale ricevuto.');
     return;
   }
@@ -1098,6 +1430,37 @@ function handleMessage(data) {
   if (type === 'freefall_detected') {
     handleFreefallEvent();
   }
+    // ── Eventi ultrasuoni ──
+  if (type === 'us_data') {
+    updateUltrasonicDisplay(data);
+    return; // non loggare (troppo frequente)
+  }
+  if (type === 'us_anticollision') {
+    handleAnticollision(data);
+  }
+  if (type === 'move_blocked') {
+    log('move_blocked', `Bloccato: ${data.reason} a ${data.distance_cm}cm`);
+  }
+  if (type === 'follow_target_lost') {
+    log('follow_target_lost', 'Target perso!');
+  }
+  if (type === 'scan_started') {
+    handleScanStarted();
+  }
+  if (type === 'scan_point') {
+    handleScanPoint(data);
+  }
+  if (type === 'scan_complete') {
+    handleScanComplete(data);
+  }
+  if (type === 'scan_data') {
+    // Risposta a richiesta dati scansione
+    if (data.data && data.data.length > 0) {
+      usScanData = data.data;
+      drawRadarMap();
+    }
+  }
+  
   
   
 
@@ -1111,7 +1474,7 @@ function handleMessage(data) {
 
 
   // Log tutto tranne noise
-  const noisy = new Set(['audio_chunk', 'sensor_data']);
+  const noisy = new Set(['audio_chunk', 'sensor_data', 'us_data']);
   if (!noisy.has(type)) {
     const body = type === 'stt_result' ? data.text :
                  type === 'command_sent' ? `${data.cmd} ${JSON.stringify(data.params)}` :
@@ -1234,6 +1597,15 @@ function updateSensorDisplay(data) {
 
   // Animazione robot basata su inclinazione
   updateRobotTilt(tilt.x || 0, tilt.y || 0);
+  
+  
+  // Aggiorna yaw se presente nei dati sensori
+  if (data.yaw !== undefined) {
+    usYaw = data.yaw;
+    updateYawCompass(usYaw);
+  }
+  
+  
 }
 
 function setSensorBar(barId, value, maxVal) {
@@ -1325,6 +1697,562 @@ function handleFreefallEvent() {
   }, 3000);
 }
 
+// ─── ULTRASUONI: UI UPDATE ────────────────────────────
+function updateUltrasonicDisplay(data) {
+  const dist = data.distance_cm !== undefined ? data.distance_cm : -1;
+  const obstacle = data.obstacle || false;
+  const mode = data.mode || usMode;
+  const scanning = data.scanning || false;
+
+  usDistance = dist;
+  usObstacle = obstacle;
+  usMode = mode;
+  usScanning = scanning;
+
+  // Aggiorna yaw se presente
+  if (data.yaw !== undefined) {
+    usYaw = data.yaw;
+    updateYawCompass(usYaw);
+  }
+
+  // Display distanza
+  const distEl = document.getElementById('us-distance');
+  if (dist < 0) {
+    distEl.textContent = '— cm';
+    distEl.className = 'us-distance-display clear';
+  } else {
+    distEl.textContent = dist.toFixed(1) + ' cm';
+    if (dist <= 20) {
+      distEl.className = 'us-distance-display danger';
+    } else if (dist <= 40) {
+      distEl.className = 'us-distance-display warning';
+    } else {
+      distEl.className = 'us-distance-display clear';
+    }
+  }
+
+  // Barra distanza (max 400cm)
+  const bar = document.getElementById('us-bar');
+  if (dist > 0) {
+    const pct = Math.min((dist / 400) * 100, 100);
+    bar.style.width = pct + '%';
+    bar.className = 'us-bar' + (dist <= 20 ? ' danger' : dist <= 40 ? ' warning' : '');
+  } else {
+    bar.style.width = '0%';
+    bar.className = 'us-bar';
+  }
+
+  // Indicatore ostacolo
+  const obstInd = document.getElementById('us-obstacle-ind');
+  if (obstacle) {
+    obstInd.textContent = '⚠️ OSTACOLO!';
+    obstInd.style.color = 'var(--accent2)';
+  } else if (dist > 0 && dist <= 40) {
+    obstInd.textContent = '⚡ Vicino';
+    obstInd.style.color = '#ffcc00';
+  } else {
+    obstInd.textContent = '✓ Via libera';
+    obstInd.style.color = 'var(--accent3)';
+  }
+
+  // Badge modalità
+  updateUsModeBadge(mode);
+  
+  
+  // Aggiorna indicatore distanza sul robot SVG (colore griglia corpo)
+  const bodyGrid = document.querySelector('.robot-svg rect[x="58"][y="140"]');
+  if (bodyGrid) {
+    if (dist > 0 && dist <= 20) {
+      bodyGrid.setAttribute('fill', '#ff3d7140');
+      bodyGrid.setAttribute('stroke', '#ff3d71');
+    } else if (dist > 0 && dist <= 40) {
+      bodyGrid.setAttribute('fill', '#ffcc0030');
+      bodyGrid.setAttribute('stroke', '#ffcc00');
+    } else {
+      bodyGrid.setAttribute('fill', '#111');
+      bodyGrid.setAttribute('stroke', '#1a2535');
+    }
+  }
+  
+  
+}
+
+function updateUsModeBadge(mode) {
+  const badge = document.getElementById('us-mode-badge');
+  badge.textContent = mode.toUpperCase();
+  badge.className = 'us-mode-badge ' + mode;
+
+  // Aggiorna pulsanti pannello destro
+  document.getElementById('us-btn-monitor').className = 'btn' + (mode === 'monitor' ? ' btn-primary' : '');
+  document.getElementById('us-btn-follow').className = 'btn' + (mode === 'follow' ? ' btn-primary' : '');
+  document.getElementById('us-btn-scan').className = 'btn' + (mode === 'scan' ? ' btn-primary' : '');
+
+  // Mostra/nascondi config follow
+  document.getElementById('follow-config').style.display = mode === 'follow' ? 'block' : 'none';
+}
+
+function updateYawCompass(yaw) {
+  const needle = document.getElementById('yaw-needle');
+  if (needle) {
+    needle.style.transform = `translate(-50%, -100%) rotate(${yaw}deg)`;
+  }
+  const yawVal = document.getElementById('us-yaw-val');
+  if (yawVal) {
+    yawVal.textContent = yaw.toFixed(0) + '°';
+  }
+}
+
+function handleAnticollision(data) {
+  const dist = data.distance_cm || 0;
+  log('us_anticollision', `⚠️ Ostacolo a ${dist.toFixed(1)} cm — STOP!`);
+
+  // Flash rosso sulla distanza
+  const distEl = document.getElementById('us-distance');
+  distEl.className = 'us-distance-display danger';
+  setTimeout(() => {
+    if (usDistance > 20) distEl.className = 'us-distance-display clear';
+  }, 2000);
+}
+
+// ─── SCANSIONE 360° ───────────────────────────────────
+function handleScanStarted() {
+  usScanning = true;
+  usScanData = [];
+  usScanProgress = 0;
+  log('scan_started', 'Scansione 360° avviata...');
+
+  // Mostra progress bar
+  document.getElementById('scan-progress-container').style.display = 'block';
+  document.getElementById('scan-progress-fill').style.width = '0%';
+  document.getElementById('scan-status').textContent = 'Scansione in corso...';
+  document.getElementById('scan-status').style.color = 'var(--accent)';
+
+  // Pulisci canvas
+  drawRadarMap();
+}
+
+function handleScanPoint(data) {
+  const point = { a: data.angle, d: data.distance };
+  usScanData.push(point);
+  usScanProgress = data.progress || 0;
+
+  // Aggiorna progress
+  document.getElementById('scan-progress-fill').style.width = usScanProgress + '%';
+  document.getElementById('scan-status').textContent = `Scansione: ${usScanProgress}%`;
+
+  // Ridisegna radar in tempo reale
+  drawRadarMap();
+}
+
+function handleScanComplete(data) {
+  usScanning = false;
+  usScanData = data.data || usScanData;
+  usScanProgress = 100;
+
+  document.getElementById('scan-progress-container').style.display = 'none';
+  document.getElementById('scan-status').textContent = `Completata: ${usScanData.length} punti`;
+  document.getElementById('scan-status').style.color = 'var(--accent3)';
+
+  log('scan_complete', `Scansione completata: ${usScanData.length} punti`);
+
+  // Disegna mappa finale
+  drawRadarMap();
+}
+
+// ─── RADAR MAP RENDERING ──────────────────────────────
+function drawRadarMap() {
+  const canvas = document.getElementById('radar-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxRange = 400; // cm max
+  const radius = (Math.min(w, h) / 2) - 20;
+
+  // Clear
+  ctx.clearRect(0, 0, w, h);
+
+  // Sfondo con cerchi concentrici
+  ctx.strokeStyle = '#1a2535';
+  ctx.lineWidth = 0.5;
+  for (let r = 1; r <= 4; r++) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, (radius / 4) * r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Linee cardinali
+  ctx.strokeStyle = '#1a253580';
+  ctx.lineWidth = 0.5;
+  for (let angle = 0; angle < 360; angle += 45) {
+    const rad = (angle - 90) * Math.PI / 180;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(rad) * radius, cy + Math.sin(rad) * radius);
+    ctx.stroke();
+  }
+
+  // Etichette distanza
+  ctx.fillStyle = '#4a6070';
+  ctx.font = '9px Share Tech Mono';
+  ctx.textAlign = 'center';
+  for (let r = 1; r <= 4; r++) {
+    const dist = (maxRange / 4) * r;
+    ctx.fillText(dist + 'cm', cx, cy - (radius / 4) * r - 4);
+  }
+
+  // Etichette direzione
+  ctx.fillStyle = '#4a6070';
+  ctx.font = '10px Share Tech Mono';
+  ctx.fillText('0°', cx, cy - radius - 8);
+  ctx.fillText('180°', cx, cy + radius + 14);
+  ctx.fillText('90°', cx + radius + 14, cy + 4);
+  ctx.fillText('270°', cx - radius - 14, cy + 4);
+
+  // Robot al centro
+  ctx.fillStyle = '#00e5ff';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Direzione robot (yaw)
+  const yawRad = (usYaw - 90) * Math.PI / 180;
+  ctx.strokeStyle = '#00e5ff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(yawRad) * 20, cy + Math.sin(yawRad) * 20);
+  ctx.stroke();
+
+  // Disegna punti scansione
+  if (usScanData.length === 0) return;
+
+  // Area riempita (poligono)
+  ctx.beginPath();
+  let firstPoint = true;
+  for (let i = 0; i < usScanData.length; i++) {
+    const point = usScanData[i];
+    if (point.d <= 0) continue; // skip punti non validi
+
+    const dist = Math.min(point.d, maxRange);
+    const r = (dist / maxRange) * radius;
+    const angleRad = (point.a - 90) * Math.PI / 180;
+    const px = cx + Math.cos(angleRad) * r;
+    const py = cy + Math.sin(angleRad) * r;
+
+    if (firstPoint) {
+      ctx.moveTo(px, py);
+      firstPoint = false;
+    } else {
+      ctx.lineTo(px, py);
+    }
+  }
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(0, 229, 255, 0.05)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 229, 255, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Punti individuali
+  for (let i = 0; i < usScanData.length; i++) {
+    const point = usScanData[i];
+    const angleRad = (point.a - 90) * Math.PI / 180;
+
+    if (point.d <= 0) {
+      // Punto non valido — segna al bordo con colore diverso
+      const px = cx + Math.cos(angleRad) * radius;
+      const py = cy + Math.sin(angleRad) * radius;
+      ctx.fillStyle = '#2a3a4a';
+      ctx.beginPath();
+      ctx.arc(px, py, 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      const dist = Math.min(point.d, maxRange);
+      const r = (dist / maxRange) * radius;
+      const px = cx + Math.cos(angleRad) * r;
+      const py = cy + Math.sin(angleRad) * r;
+
+      // Colore in base alla distanza
+      let color;
+      if (dist <= 20) color = '#ff3d71';       // rosso: pericolo
+      else if (dist <= 40) color = '#ffcc00';   // giallo: attenzione
+      else if (dist <= 100) color = '#ff9f43';  // arancione: medio
+      else color = '#39ff87';                    // verde: libero
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Glow
+      ctx.fillStyle = color + '40';
+      ctx.beginPath();
+      ctx.arc(px, py, 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Se scansione in corso, disegna "sweep" animato
+  if (usScanning && usScanData.length > 0) {
+    const lastPoint = usScanData[usScanData.length - 1];
+    const sweepRad = (lastPoint.a - 90) * Math.PI / 180;
+    
+    // Linea di sweep
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(sweepRad) * radius, cy + Math.sin(sweepRad) * radius);
+    ctx.stroke();
+
+    // Cono di sweep (effetto radar)
+    const sweepWidth = 15 * Math.PI / 180; // 15 gradi
+    ctx.fillStyle = 'rgba(0, 229, 255, 0.08)';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, sweepRad - sweepWidth, sweepRad, false);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+    
+// ─── COMANDI ULTRASUONI ───────────────────────────────
+function setUsMode(mode) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log('error', 'Non connesso!');
+    return;
+  }
+
+  const params = { mode: mode };
+  if (mode === 'follow') {
+    params.speed = +document.getElementById('sl-follow-speed').value;
+  }
+
+  ws.send(JSON.stringify({
+    type: 'us_command',
+    command: 'set_mode',
+    params: params
+  }));
+
+  updateUsModeBadge(mode);
+  log('us_command', `Modalità: ${mode}`);
+}
+
+function startScan() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log('error', 'Non connesso!');
+    return;
+  }
+
+  ws.send(JSON.stringify({
+    type: 'us_command',
+    command: 'scan'
+  }));
+
+  log('us_command', 'Avvio scansione 360°');
+}
+
+function requestDistance() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log('error', 'Non connesso!');
+    return;
+  }
+
+  ws.send(JSON.stringify({
+    type: 'us_command',
+    command: 'get_distance'
+  }));
+
+  log('us_command', 'Richiesta distanza');
+}
+
+function stopFollow() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log('error', 'Non connesso!');
+    return;
+  }
+
+  ws.send(JSON.stringify({
+    type: 'us_command',
+    command: 'stop_follow'
+  }));
+
+  log('us_command', 'Stop follow-me');
+}
+
+function calibrateYaw() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log('error', 'Non connesso!');
+    return;
+  }
+
+  ws.send(JSON.stringify({
+    type: 'us_command',
+    command: 'calibrate_yaw'
+  }));
+
+  usYaw = 0;
+  updateYawCompass(0);
+  log('us_command', 'Yaw resettato a 0°');
+}
+
+function updateFollowConfig() {
+  const speed = +document.getElementById('sl-follow-speed').value;
+  document.getElementById('sv-follow-speed').textContent = speed;
+
+  // Invia configurazione aggiornata se in modalità follow
+  if (usMode === 'follow' && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'us_command',
+      command: 'follow_config',
+      params: { speed: speed }
+    }));
+  }
+}
+
+// ─── GESTIONE MAPPE ───────────────────────────────────
+function saveMap() {
+  if (usScanData.length === 0) {
+    log('error', 'Nessuna mappa da salvare! Esegui prima una scansione.');
+    return;
+  }
+
+  const name = prompt('Nome della mappa:', `Mappa ${new Date().toLocaleString('it-IT')}`);
+  if (!name) return;
+
+  const mapEntry = {
+    id: Date.now(),
+    name: name,
+    date: new Date().toISOString(),
+    data: [...usScanData],
+    yaw: usYaw,
+    points: usScanData.length
+  };
+
+  savedMaps.push(mapEntry);
+  localStorage.setItem('robot_maps', JSON.stringify(savedMaps));
+
+  log('map_saved', `Mappa "${name}" salvata (${usScanData.length} punti)`);
+  renderSavedMapsList();
+}
+
+function exportMapImage() {
+  const canvas = document.getElementById('radar-canvas');
+  if (!canvas) return;
+
+  if (usScanData.length === 0) {
+    log('error', 'Nessuna mappa da esportare!');
+    return;
+  }
+
+  // Crea un canvas temporaneo con sfondo nero (per export leggibile)
+  const exportCanvas = document.createElement('canvas');
+  exportCanvas.width = canvas.width;
+  exportCanvas.height = canvas.height;
+  const exportCtx = exportCanvas.getContext('2d');
+
+  // Sfondo
+  exportCtx.fillStyle = '#080c10';
+  exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+  // Copia il contenuto del radar
+  exportCtx.drawImage(canvas, 0, 0);
+
+  // Aggiungi titolo e timestamp
+  exportCtx.fillStyle = '#c8dae8';
+  exportCtx.font = '12px Share Tech Mono';
+  exportCtx.textAlign = 'left';
+  exportCtx.fillText(`Robot Radar Map — ${new Date().toLocaleString('it-IT')}`, 10, 20);
+  exportCtx.fillText(`Punti: ${usScanData.length} | Yaw: ${usYaw.toFixed(0)}°`, 10, 36);
+
+  // Download
+  const link = document.createElement('a');
+  link.download = `robot_map_${Date.now()}.png`;
+  link.href = exportCanvas.toDataURL('image/png');
+  link.click();
+
+  log('map_exported', 'Mappa esportata come immagine PNG');
+}
+
+function clearMap() {
+  usScanData = [];
+  usScanProgress = 0;
+  document.getElementById('scan-status').textContent = 'Nessuna scansione';
+  document.getElementById('scan-status').style.color = 'var(--text-dim)';
+  document.getElementById('scan-progress-container').style.display = 'none';
+  drawRadarMap();
+  log('map_cleared', 'Mappa cancellata');
+}
+
+function toggleSavedMaps() {
+  const panel = document.getElementById('saved-maps-panel');
+  const isVisible = panel.style.display !== 'none';
+  panel.style.display = isVisible ? 'none' : 'block';
+  if (!isVisible) {
+    renderSavedMapsList();
+  }
+}
+
+function renderSavedMapsList() {
+  const list = document.getElementById('saved-maps-list');
+
+  if (savedMaps.length === 0) {
+    list.innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);padding:8px;text-align:center;">Nessuna mappa salvata</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  // Mostra dalla più recente
+  const sorted = [...savedMaps].reverse();
+
+  sorted.forEach(map => {
+    const item = document.createElement('div');
+    item.className = 'saved-map-item';
+
+    const dateStr = new Date(map.date).toLocaleString('it-IT', {
+      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+    });
+
+    item.innerHTML = `
+      <span class="map-name">${map.name}</span>
+      <span class="map-date">${dateStr} (${map.points}pt)</span>
+      <button class="btn" style="padding:2px 6px;font-size:9px;margin-left:6px;" onclick="loadMap(${map.id})">📂</button>
+      <button class="btn btn-danger" style="padding:2px 6px;font-size:9px;margin-left:4px;" onclick="deleteMap(${map.id})">✕</button>
+    `;
+
+    list.appendChild(item);
+  });
+}
+
+function loadMap(mapId) {
+  const map = savedMaps.find(m => m.id === mapId);
+  if (!map) {
+    log('error', 'Mappa non trovata');
+    return;
+  }
+
+  usScanData = [...map.data];
+  document.getElementById('scan-status').textContent = `Caricata: ${map.name}`;
+  document.getElementById('scan-status').style.color = 'var(--accent3)';
+  drawRadarMap();
+  log('map_loaded', `Mappa "${map.name}" caricata (${map.points} punti)`);
+}
+
+function deleteMap(mapId) {
+  const idx = savedMaps.findIndex(m => m.id === mapId);
+  if (idx === -1) return;
+
+  const name = savedMaps[idx].name;
+  if (!confirm(`Eliminare la mappa "${name}"?`)) return;
+
+  savedMaps.splice(idx, 1);
+  localStorage.setItem('robot_maps', JSON.stringify(savedMaps));
+  renderSavedMapsList();
+  log('map_deleted', `Mappa "${name}" eliminata`);
+}
 
 
 
