@@ -1179,20 +1179,20 @@ async def ws_cmd(ws: WebSocket):
                     # Reazione LLM solo se il robot è IDLE (non interrompere conversazioni)
                     if robot.current_state == "idle":
                         # Intensità diversa → reazione diversa
-                        if intensity > 4.0:
+                        if intensity > 1:
                             prompt = (
                                 f"[EVENTO FISICO] Qualcuno ti ha dato un colpo forte (intensità: {intensity:.1f}g)! "
-                                f"Reagisci in modo sorpreso/spaventato/arrabbiato. Breve, max 1 frase."
+                                f"Reagisci in modo sorpreso/spaventato/arrabbiato."
                             )
-                        elif intensity > 3.0:
+                        elif intensity > 0.5:
                             prompt = (
                                 f"[EVENTO FISICO] Qualcuno ti ha dato un colpetto medio (intensità: {intensity:.1f}g). "
-                                f"Reagisci in modo un po' infastidito ma simpatico. Breve."
+                                f"Reagisci in modo un po' infastidito ma simpatico. "
                             )
                         else:
                             prompt = (
                                 f"[EVENTO FISICO] Qualcuno ti ha toccato leggermente (intensità: {intensity:.1f}g). "
-                                f"Reagisci in modo curioso o divertito. Breve."
+                                f"Reagisci in modo curioso o divertito."
                             )
                         asyncio.create_task(safe_run_pipeline_from_text(prompt))
 

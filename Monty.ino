@@ -96,14 +96,16 @@ volatile uint32_t micEnableAfterMs = 10;  // millis() dopo cui il mic può ascol
 
 
 // ─── CONFIGURAZIONE SENSORI IMU ──────────────────────────────────────────────────
-#define SENSOR_READ_INTERVAL_MS    100   // Lettura accelerometro a 10Hz (per tap detection)
+#define SENSOR_READ_INTERVAL_MS    20   // Lettura accelerometro a 10Hz (per tap detection)
 #define SENSOR_REPORT_INTERVAL_MS  1000  // Invio dati al server ogni 1s
-#define TAP_THRESHOLD              2.5f  // Soglia accelerazione per "colpetto" (in g)
+#define TAP_THRESHOLD              1.5f  // Soglia accelerazione per "colpetto" (in g)
 #define TAP_COOLDOWN_MS            1000  // Cooldown tra tap consecutivi
-#define TILT_THRESHOLD_DEG         35.0f // Gradi di inclinazione per allarme
+#define TILT_THRESHOLD_DEG         20.0f // Gradi di inclinazione per allarme
 #define TILT_SUSTAINED_MS          500   // ms di inclinazione continua per triggerare
 #define FREEFALL_THRESHOLD         0.3f  // Sotto 0.3g = caduta libera
 #define FREEFALL_DURATION_MS       150   // ms di caduta libera per triggerare
+#define TEMP_OFFSET                -4.0f  // Offset statico per calibrazione BMP280 (in °C)
+
 
 
 // ─── OGGETTI GLOBALI ─────────────────────────────────────────────────────────
@@ -1562,6 +1564,7 @@ void taskSensors(void* param) {
 
   uint32_t lastReportMs = 0;
   uint32_t lastReadMs = 0;
+  float lastAccelMag = 1.0f; 
   
   // Buffer per media mobile (smoothing)
   float accelHistory[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
@@ -1577,7 +1580,7 @@ void taskSensors(void* param) {
     uint32_t now = millis();
 
     // ══════════════════════════════════════════════════════════════════════════
-    // LETTURA RAPIDA (ogni 100ms = 10Hz)
+    // LETTURA RAPIDA
     // ══════════════════════════════════════════════════════════════════════════
     if (now - lastReadMs >= SENSOR_READ_INTERVAL_MS) {
       lastReadMs = now;
@@ -1609,14 +1612,23 @@ void taskSensors(void* param) {
 
       // ── TAP DETECTION ──────────────────────────────────────────────────
       // Un "tap" è un picco improvviso: magnitudine molto sopra 1g
-      float deviation = fabsf(accelMag - avgMag);
-      bool tapNow = (accelMag > TAP_THRESHOLD) && 
-                    (deviation > 1.0f) &&
+      float deltaAccel = fabsf(accelMag - lastAccelMag);
+      // float deviation = fabsf(accelMag - avgMag);
+      // bool tapNow = (accelMag > TAP_THRESHOLD) && 
+      //               (deviation > 0.8f) &&
+      //               (now - sensorState.lastTapMs > TAP_COOLDOWN_MS);
+      bool tapNow = (deltaAccel > 0.5f) &&       // Variazione improvvisa
+                    (accelMag > TAP_THRESHOLD) && // Supera la soglia minima (es. 1.5f)
                     (now - sensorState.lastTapMs > TAP_COOLDOWN_MS);
 
+
+      // if (tapNow) {
+      //   Serial.printf("[SENS] 🤜 TAP rilevato! Intensità: %.2fg (dev: %.2f)\n", 
+      //                 accelMag, deviation);
+
       if (tapNow) {
-        Serial.printf("[SENS] 🤜 TAP rilevato! Intensità: %.2fg (dev: %.2f)\n", 
-                      accelMag, deviation);
+        Serial.printf("[SENS] 🤜 TAP rilevato! Intensità: %.2fg (delta: %.2f)\n", 
+                      accelMag, deltaAccel);
 
         xSemaphoreTake(sensorMutex, portMAX_DELAY);
         sensorState.tapDetected = true;
@@ -1638,6 +1650,8 @@ void taskSensors(void* param) {
         userLedOverrideUntil = millis() + 1500;
         setLedColor(255, 100, 0); // arancione flash
       }
+      // Aggiorna il valore per il prossimo ciclo (mettilo subito dopo l'if del tapNow)
+      lastAccelMag = accelMag;
 
       // ── TILT DETECTION ─────────────────────────────────────────────────
       bool isTilted = (fabsf(tiltX) > TILT_THRESHOLD_DEG) || 
@@ -1738,8 +1752,8 @@ void taskSensors(void* param) {
 
       if (wsCmdConnected) {
         // Lettura BMP280 (lenta, 1Hz è sufficiente)
-        float temp = bmp.readTemperature();
-        float press = bmp.readPressure() / 100.0F;
+        float temp = bmp.readTemperature() + TEMP_OFFSET;
+        float press = bmp.readPressure() / 100.0F; 
 
         xSemaphoreTake(sensorMutex, portMAX_DELAY);
         sensorState.temperature = temp;
