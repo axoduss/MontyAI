@@ -47,9 +47,29 @@ class WebSearchSkill(BaseSkill):
                 response.raise_for_status()
 
                 matches = re.findall(
-                    r'<a class="result__a" href="([^"]+)">([^<]+)</a>',
-                    response.text, re.IGNORECASE
+                    r'<a[^>]+href=["\']([^"\'>]+)["\'][^>]*>([^<]+)</a>',
+                    response.text, re.IGNORECASE | re.DOTALL
                 )
+
+                # Filtra solo i risultati pertinenti (evita link di navigazione)
+                filtered_matches = []
+                for link, title in matches:
+                    # Skip link interni a DuckDuckGo
+                    if any(skip in link.lower() for skip in ['/html/', 'duckduckgo', 'yandex']):
+                        continue
+                    # Skip titoli troppo corti o vuoti
+                    if len(title.strip()) < 3:
+                        continue
+                    filtered_matches.append((link, title))
+
+                # Se il primo pattern non trova nulla, prova alternativa
+                if not filtered_matches:
+                    # Pattern alternativo per snippet dei risultati
+                    alt_matches = re.findall(
+                        r'class=["\']result__title["\'][^>]*href=["\']([^"\']+)[^>]*>([^<]+)',
+                        response.text, re.IGNORECASE
+                    )
+                    filtered_matches = alt_matches[:limit]
 
                 results = [
                     {
@@ -59,7 +79,7 @@ class WebSearchSkill(BaseSkill):
                                       .strip(),
                         "url": link
                     }
-                    for link, title in matches[:limit]
+                    for link, title in filtered_matches[:limit]
                 ]
 
                 return {
