@@ -192,6 +192,7 @@ class YouTubeSkill(BaseSkill):
 
         if result.returncode != 0:
             log.error("[YouTube] ffmpeg errore: %s", result.stderr[:300])
+            self._cleanup(input_path)
             return None
 
         file_size = os.path.getsize(output_path)
@@ -205,5 +206,6 @@ class YouTubeSkill(BaseSkill):
             try:
                 if path and os.path.exists(path):
                     os.remove(path)
-            except Exception:
-                pass
+                    log.debug("[YouTube] Cleanup: rimosso %s", path)
+            except Exception as e:
+                log.warning("[YouTube] Cleanup fallito per %s: %s", path, e)
