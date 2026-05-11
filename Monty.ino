@@ -72,13 +72,17 @@ const char* WS_CMD_PATH    = "/cmd";
 #define BUMPER_RIGHT_PIN  GPIO_NUM_11
 #define BUMPER_DEBOUNCE_MS 50  // debounce software
 
-
-// ─── ULTRASUONI HC-SR04 ──────────────────────────────────────────────────────
-#define US_TRIG_PIN       GPIO_NUM_9
-#define US_ECHO_PIN       GPIO_NUM_10
+// ─── ULTRASUONI HC-SR04 RCWL-9620 ─────────────────────────────────────────────
+#define I2C2_SDA              GPIO_NUM_10
+#define I2C2_SCL              GPIO_NUM_9
+#define I2C2_FREQ             100000
+#define US_I2C_ADDR           0x57    // Indirizzo I2C fisso RCWL-9620
+#define US_CMD_START          0x01    // Comando avvio misura
+#define US_REG_READ           0xAF    // Registro lettura risultato
+#define US_MEASURE_DELAY_MS   120  // ms attesa dopo trigger
 #define US_MAX_DISTANCE_CM    400   // oltre questo, consideriamo "nessun ostacolo"
 #define US_TIMEOUT_US         25000 // timeout echo (~4.3m)
-#define US_READ_INTERVAL_MS   50    // lettura ogni 50ms (20Hz)
+#define US_READ_INTERVAL_MS   150    // lettura ogni 50ms (20Hz)
 #define US_ANTICOLLISION_CM   20    // distanza minima anticollisione
 #define US_SLOWDOWN_CM        40    // distanza a cui rallentare
 #define US_FOLLOW_TARGET_CM   80    // distanza target follow-me
@@ -131,12 +135,20 @@ volatile uint32_t micEnableAfterMs = 10;  // millis() dopo cui il mic può ascol
 WebSocketsClient wsAudio;   // WebSocket per stream audio → server
 WebSocketsClient wsCmd;     // WebSocket per comandi JSON ← server
 
+TwoWire Wire1_US = TwoWire(1);  // Bus I2C numero 1 per gli ultrasuoni
+
+
+
 Adafruit_NeoPixel strip(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 DisplayManager display;
 
 // Per i sensori
 Adafruit_BMP280 bmp;
 MPU6500_WE mpu = MPU6500_WE(MPU6500_ADDR);
+
+
+
+
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 enum RobotState { IDLE, LISTENING, PROCESSING, SPEAKING, PLAYING_MUSIC };
@@ -383,9 +395,9 @@ void setup() {
   setupI2S_Speaker();
   setupMotors();      
   setupBumpers();
-  setupUltrasonic();     
   setupWebSockets();
-  setupSensors();
+  setupSensors();    // Wire.begin(17, 18) — bus 0, 400kHz
+  setupUltrasonic(); // Wire1_US.begin(9, 10) — bus 1, 100kHz
 
    // Display OLED
   if (!display.begin()) {
@@ -575,44 +587,64 @@ void setupBumpers() {
 
 // ─── SETUP ULTRASUONI ────────────────────────────────────────────────────────
 void setupUltrasonic() {
-  pinMode(US_TRIG_PIN, OUTPUT);
-  pinMode(US_ECHO_PIN, INPUT);
-  digitalWrite(US_TRIG_PIN, LOW);
+  // Inizializza secondo bus I2C dedicato agli ultrasuoni
+  Wire1_US.begin(I2C2_SDA, I2C2_SCL, I2C2_FREQ);
+  
+  // Verifica presenza sensore
+  Wire1_US.beginTransmission(US_I2C_ADDR);
+  uint8_t err = Wire1_US.endTransmission();
+  
+  if (err == 0) {
+    Serial.println("[US] RCWL-9620 trovato su I2C bus 1 (0x57, 100kHz).");
+  } else {
+    Serial.printf("[US] WARN: sensore US non risponde (err=%d).\n", err);
+  }
   
   usMutex = xSemaphoreCreateMutex();
-  
-  // Inizializza stato
   memset((void*)&usState, 0, sizeof(UltrasonicState));
   usState.mode = US_MODE_MONITOR;
   for (int i = 0; i < 36; i++) usState.scanData[i] = -1.0f;
   
-  Serial.println("[US] HC-SR04 pronto (Trig=GPIO9, Echo=GPIO10).");
+  Serial.println("[US] Setup completato (bus I2C dedicato, GPIO 9/10, 100kHz).");
 }
 
 // ─── LETTURA DISTANZA (singola, non bloccante per il task) ───────────────────
 float usReadDistanceCm() {
-  // Trigger pulse: 10µs HIGH
-  digitalWrite(US_TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(US_TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(US_TRIG_PIN, LOW);
+  // Invia comando di misura sul bus I2C dedicato
+  Wire1_US.beginTransmission(US_I2C_ADDR);
+  Wire1_US.write(US_CMD_START);
+  uint8_t err = Wire1_US.endTransmission();
   
-  // Misura durata echo
-  unsigned long duration = pulseIn(US_ECHO_PIN, HIGH, US_TIMEOUT_US);
-  
-  if (duration == 0) {
-    return -1.0f;  // Nessun echo (fuori range o errore)
-  }
-  
-  // Velocità suono ~343 m/s → 0.0343 cm/µs → andata+ritorno /2
-  float distance = (duration * 0.0343f) / 2.0f;
-  
-  if (distance > US_MAX_DISTANCE_CM) {
+  if (err != 0) {
     return -1.0f;
   }
   
-  return distance;
+  // Attendi misura
+  vTaskDelay(pdMS_TO_TICKS(US_MEASURE_DELAY_MS));
+  
+  // Leggi risultato
+  Wire1_US.beginTransmission(US_I2C_ADDR);
+  Wire1_US.write(US_REG_READ);
+  Wire1_US.endTransmission(false);
+  
+  Wire1_US.requestFrom((uint8_t)US_I2C_ADDR, (uint8_t)3);
+  
+  if (Wire1_US.available() < 3) {
+    return -1.0f;
+  }
+  
+  uint32_t H = Wire1_US.read();
+  uint32_t M = Wire1_US.read();
+  uint32_t L = Wire1_US.read();
+  uint32_t micrometers = (H << 16) | (M << 8) | L;
+  
+  float cm = micrometers / 10000.0f;
+  
+  if (cm < 2.0f || cm > US_MAX_DISTANCE_CM) {
+    return -1.0f;
+  }
+  
+  return cm;
 }
 
 // ─── LETTURA CON MEDIANA (più robusta) ───────────────────────────────────────
@@ -625,12 +657,12 @@ float usReadMedianCm(uint8_t samples) {
     if (d > 0) {
       readings[validCount++] = d;
     }
-    if (i < samples - 1) delayMicroseconds(2500); // pausa tra letture
+    // Nessun delay extra necessario — usReadDistanceCm() ha già 120ms interni
   }
   
   if (validCount == 0) return -1.0f;
   
-  // Bubble sort per mediana (array piccolo, OK)
+  // Bubble sort per mediana
   for (uint8_t i = 0; i < validCount - 1; i++) {
     for (uint8_t j = 0; j < validCount - i - 1; j++) {
       if (readings[j] > readings[j + 1]) {

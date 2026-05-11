@@ -1310,6 +1310,7 @@ async def ws_cmd(ws: WebSocket):
                     robot.us_obstacle = data.get("obstacle", False)
                     robot.us_mode = data.get("mode", "monitor")
                     robot.us_scanning = data.get("scanning", False)
+                    robot.us_yaw = data.get("yaw", 0.0)
                     
                     # Broadcast alla dashboard (throttled a 500ms)
                     now = time.time()
@@ -1321,6 +1322,7 @@ async def ws_cmd(ws: WebSocket):
                             "obstacle": robot.us_obstacle,
                             "mode": robot.us_mode,
                             "scanning": robot.us_scanning,
+                            "yaw": robot.us_yaw,
                         })
 
                 elif data.get("event") == "us_anticollision":
