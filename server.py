@@ -915,7 +915,6 @@ async def execute_commands_parallel(commands: list[dict]):
     tasks = []
 
     if "motor" in groups:
-        motor_abort_event.clear()
         tasks.append(run_motor_sequence(groups["motor"]))
 
     if "led" in groups:
@@ -939,6 +938,8 @@ async def run_motor_sequence(commands: list[dict]):
     Esegue comandi motore in sequenza, aspettando duration_ms tra uno e l'altro.
     Interrompibile da motor_abort_event (bumper).
     """
+    motor_abort_event.clear()
+    
     for i, cmd_obj in enumerate(commands):
         # Check abort
         if motor_abort_event.is_set():
@@ -1074,6 +1075,11 @@ async def ws_audio(ws: WebSocket):
                 if robot.current_state == "playing_music":
                     async with robot.audio_lock:
                         robot.audio_buffer.append(msg["bytes"])
+                        # Limita buffer a 3 secondi di audio durante musica
+                        max_bytes = SAMPLE_RATE * 2 * 3  # 3 sec
+                        total = sum(len(c) for c in robot.audio_buffer)
+                        if total > max_bytes:
+                            robot.audio_buffer = robot.audio_buffer[-10:]  # Tieni solo gli ultimi chunk
                     continue
                 
                 
@@ -1213,14 +1219,14 @@ async def ws_cmd(ws: WebSocket):
                     # Se sta suonando musica, fermala anche
                     if robot.current_state == "playing_music":
                         music_abort_event.set()
-                    else:
-                        asyncio.create_task(
-                            safe_run_pipeline_from_text(
-                            f"[EVENTO AUTOMATICO] Monty ha appena colpito un ostacolo con il bumper {side}. "
-                            f"Ha già fatto retromarcia e si è allontanato. "
-                            f"Commenta brevemente la situazione in modo spontaneo e un po' ironico."
-                            )
+                    
+                    asyncio.create_task(
+                        safe_run_pipeline_from_text(
+                        f"[EVENTO AUTOMATICO] Monty ha appena colpito un ostacolo con il bumper {side}. "
+                        f"Ha già fatto retromarcia e si è allontanato. "
+                        f"Commenta brevemente la situazione in modo spontaneo e un po' ironico."
                         )
+                    )
 
 
                 # Eventi motore
@@ -1277,7 +1283,7 @@ async def ws_cmd(ws: WebSocket):
                     log.warning("[SENSOR] ⚠️ TILT! X=%.1f° Y=%.1f°", angle_x, angle_y)
                     robot.log_event("tilt_alert", {"angle_x": angle_x, "angle_y": angle_y})
 
-                    if robot.current_state == "idle":
+                    if robot.current_state in ("idle", "speaking"):
                         asyncio.create_task(safe_run_pipeline_from_text(
                             f"[EVENTO FISICO] Ti stai inclinando troppo! Angolo X={angle_x:.0f}°, Y={angle_y:.0f}°. "
                             f"Sei preoccupato di cadere. Reagisci con panico/preoccupazione. Max 1 frase breve."
@@ -1287,7 +1293,7 @@ async def ws_cmd(ws: WebSocket):
                     log.info("[SENSOR] ✓ Inclinazione recuperata")
                     robot.log_event("tilt_recovered", {})
 
-                    if robot.current_state == "idle":
+                    if robot.current_state in ("idle", "speaking"):
                         asyncio.create_task(safe_run_pipeline_from_text(
                             "[EVENTO FISICO] Eri inclinato ma ora sei tornato dritto. "
                             "Esprimi sollievo in modo buffo. Max 1 frase brevissima."

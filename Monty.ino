@@ -782,6 +782,29 @@ void usFollowMeLogic(float distCm) {
  * Durante la scansione, l'anticollisione è sospesa.
  */
 void usScan360() {
+
+  // Ferma qualsiasi movimento in corso e notifica
+  if (motorsRunning) {
+      Serial.println("[US-SCAN] Motori in uso, fermo prima della scansione.");
+      motorStop();
+      if (wsCmdConnected) {
+          wsCmd.sendTXT("{\"event\":\"motor_preempted\",\"reason\":\"scan_360\"}");
+      }
+      vTaskDelay(pdMS_TO_TICKS(200)); // Attendi stabilizzazione
+  }
+  
+  // Disabilita follow-me durante la scansione
+  xSemaphoreTake(usMutex, portMAX_DELAY);
+  bool wasFollowing = usState.followActive;
+  usState.followActive = false;
+  usState.scanInProgress = true;
+  usState.scanComplete = false;
+  usState.scanPoints = 0;
+  xSemaphoreGive(usMutex);
+
+
+
+
   Serial.println("[US-SCAN] Avvio scansione 360°...");
   
   xSemaphoreTake(usMutex, portMAX_DELAY);
@@ -824,7 +847,7 @@ void usScan360() {
         motorTurnLeft(100);
       }
       
-            // Attendi di raggiungere l'angolo (con timeout)
+      // Attendi di raggiungere l'angolo (con timeout)
       uint32_t rotStart = millis();
       while (millis() - rotStart < 2000) {  // max 2s per step
         currentYaw = imuYawDeg;
@@ -840,6 +863,17 @@ void usScan360() {
       
       motorStop();
       vTaskDelay(pdMS_TO_TICKS(US_SCAN_SETTLE_MS));  // Attendi stabilizzazione
+
+      // Ripristina follow-me se era attivo
+    if (wasFollowing) {
+        xSemaphoreTake(usMutex, portMAX_DELAY);
+        usState.followActive = true;
+        usState.mode = US_MODE_FOLLOW;
+        xSemaphoreGive(usMutex);
+    }
+
+
+
     }
     
     // Leggi distanza (mediana per robustezza)
@@ -2297,7 +2331,9 @@ void taskSensors(void* param) {
       // Integra il giroscopio Z per ottenere l'heading approssimato
       // dt = SENSOR_READ_INTERVAL_MS / 1000.0
       float dt = SENSOR_READ_INTERVAL_MS / 1000.0f;
-      imuYawDeg += gz * dt;
+      // Dead-zone: ignora rotazioni sotto 1°/s (drift tipico)
+      #define GYRO_DEADZONE 1.0f
+      float gz_filtered = (fabsf(gz) > GYRO_DEADZONE) ? gz : 0.0f;
       // Normalizza a 0-360
       while (imuYawDeg >= 360.0f) imuYawDeg -= 360.0f;
       while (imuYawDeg < 0.0f) imuYawDeg += 360.0f;
