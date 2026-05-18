@@ -1,50 +1,53 @@
-# Monty - Robot ESP32-S3 con Voice Assistant
+# Monty - ESP32-S3 Robot with Voice Assistant
 
-Un robot conversazionale basato su ESP32-S3 con controllo vocale, display animato per gli occhi e integrazione con AI locale.
+A conversational robot based on ESP32-S3 with voice control, animated eye display, and local AI integration.
 
-## 🎯 Caratteristiche
+## 🎯 Features
 
-- **Controllo Vocale**: Speech-to-text tramite Faster Whisper
-- **AI Locale**: Integrazione con Ollama (Gemma4)
-- **Sintesi Vocale**: TTS con Piper
-- **Display Occhi**: Animazioni NeoPixel WS2812 per esprimere emozioni
-- **Skill System**: Architettura modulare per estendere le funzionalità
-- **Audio Bidirezionale**: Microfono I2S (INMP441) + Speaker I2S (MAX98357A)
-- **Sensori**: BMP280 (pressione/temperatura) + MPU6500 (accelerometro/giroscopio)
-- **OTA Updates**: Aggiornamenti over-the-air per il firmware ESP32
+- **Voice Control**: Speech-to-text via Faster Whisper
+- **Local AI**: Integration with Ollama (Gemma4)
+- **Speech Synthesis**: TTS with Piper
+- **Eye Display**: NeoPixel WS2812 animations to express emotions
+- **Skill System**: Modular architecture to extend functionalities
+- **Bidirectional Audio**: I2S Microphone (INMP441) + I2S Speaker (MAX98357A)
+- **Sensors**: BMP280 (pressure/temperature) + MPU6500 (accelerometer/gyroscope)
+- **OTA Updates**: Over-the-air updates for the ESP32 firmware
 
-## 📁 Struttura del Progetto
+## 📁 Project Structure
 
 ```
-├── Monty.ino              # Firmware Arduino per ESP32-S3
-├── server.py              # Server Python (FastAPI + WebSocket)
-├── dashboard.html         # Interfaccia web per il monitoraggio
-├── display_eyes.h         # Libreria animazioni occhi
-├── credentials.h.example  # Template per le credenziali WiFi
-├── skills/                # Moduli skill (meteo, news, timer, ecc.)
-├── start.sh               # Script di avvio del server
-└── README.md              # Questa documentazione
+├── Monty.ino              # Arduino Firmware for ESP32-S3
+├── server.py              # Python Server (FastAPI + WebSocket)
+├── dashboard.html         # Web interface for monitoring
+├── display_eyes.h         # Eye animations library
+├── credentials.h.example  # Template for WiFi credentials
+├── skills/                # Skill modules (weather, news, timer, etc.)
+├── start.sh               # Server startup script
+└── README.md              # This documentation
 ```
 
-## 🛠️ Requisiti Hardware
+## 🛠️ Hardware Requirements
 
-- **Microcontrollore**: ESP32-S3 N16R8
-- **Microfono**: INMP441 (I2S)
+- **Microcontroller**: ESP32-S3 N16R8
+- **Microphone**: INMP441 (I2S)
 - **Speaker**: MAX98357A (I2S)
 - **LED**: NeoPixel WS2812
-- **Sensori**: BMP280, MPU6500
+- **Display**: SS1306
+- **Sensors**: BMP280, MPU6500, 
+- **Motors**:
+- **Bumper**:
 
-## 💻 Requisiti Software
+## 💻 Software Requirements
 
-### Per il Server (Python 3.8+)
+### For the Server (Python 3.8+)
 
 ```bash
 pip install fastapi uvicorn websockets numpy faster-whisper ollama
 ```
 
-### Per l'ESP32 (Arduino IDE 2.x)
+### For the ESP32 (Arduino IDE 2.x)
 
-Librerie richieste:
+Required libraries:
 - WebSockets by Markus Sattler (2.x)
 - Adafruit NeoPixel
 - ArduinoJson (7.x)
@@ -52,38 +55,38 @@ Librerie richieste:
 - MPU6500_WE
 - ESP32 core (con driver/i2s.h, WiFi.h, ArduinoOTA.h)
 
-## 🚀 Installazione
+## 🚀 Installation
 
-### 1. Configura le Credenziali WiFi
+### 1. Configure WiFi Credentials
 
-Copia il file di esempio e inserisci le tue credenziali:
+Copy the example file and enter your credentials:
 
 ```bash
 cp credentials.h.example credentials.h
 ```
 
-Modifica `credentials.h` con il tuo SSID e password:
+Edit credentials.h with your SSID and password:
 
 ```cpp
-#define WIFI_SSID "tua_rete"
-#define WIFI_PASSWORD "tua_password"
+#define WIFI_SSID "your_network"
+#define WIFI_PASSWORD "your_password"
 ```
 
-### 2. Configura il Server
+### 2. Configure the Server
 
-Modifica le impostazioni del server in `server.py` se necessario:
+Modify the server settings in server.py if necessary:
 
 ```python
 OLLAMA_MODEL = "gemma4:e4b"
 WHISPER_MODEL = "base"
 ```
 
-Assicurati che Ollama sia in esecuzione:
+Make sure Ollama is running:
 ```bash
 ollama serve
 ```
 
-### 3. Avvia il Server
+### 3. Start the Server
 
 ```bash
 ./start.sh
@@ -91,33 +94,33 @@ ollama serve
 uvicorn server:app --host 0.0.0.0 --port 8765 --reload
 ```
 
-### 4. Carica il Firmware sull'ESP32
+### 4. Upload Firmware to ESP32
 
-1. Apri `Monty.ino` con Arduino IDE
-2. Seleziona la scheda ESP32-S3
-3. Modifica l'IP del server in `Monty.ino`:
+1. Open `Monty.ino` with Arduino IDE
+2. Select the ESP32-S3 board
+3. Change the server IP in `Monty.ino`:
    ```cpp
    const char* SERVER_HOST = "192.168.1.8"; // IP del tuo PC
    ```
-4. Carica il firmware sulla scheda
+4. Upload the firmware to the board
 
-## 🎭 Skill Disponibili
+## 🎭 Available Skills
 
-Il sistema supporta un'architettura modulare di skill:
+The system supports a modular skill architecture:
 
-- **DateTime**: Ora e data corrente
-- **News**: Ultime notizie
-- **Weather**: Previsioni meteo
-- **Timer**: Gestione timer e sveglie
-- **Sensor**: Lettura sensori (temperatura, pressione, movimento)
-- **Web Search**: Ricerche sul web
-- **YouTube**: Ricerca e riproduzione video
+- **DateTime**: Current time and date
+- **News**: Latest news
+- **Weather**: Weather forecast
+- **Timer**: Timer and alarm management
+- **Sensor**: Sensor readings (temperature, pressure, motion)
+- **Web Search**: Web searches
+- **YouTube**: Video search and playback
 
-Per aggiungere nuove skill, crea un nuovo file in `skills/` seguendo il template di `base.py`.
+To add new skills, create a new file in  `skills/` following the `base.py` template.
 
-## 🔌 Emozioni del Robot
+## 🔌 Robot Emotions
 
-Il robot può esprimere diverse emozioni attraverso il display degli occhi:
+The robot can express different emotions through the eye display:
 
 - neutral, happy, sad, angry, surprised
 - sleepy, thinking, love, wink, skeptical
@@ -125,35 +128,35 @@ Il robot può esprimere diverse emozioni attraverso il display degli occhi:
 
 ## 🌐 Dashboard
 
-Apri `dashboard.html` nel browser per monitorare lo stato del robot e visualizzare i log in tempo reale.
+Open `dashboard.html` in your browser to monitor the robot's status and view real-time logs.
 
-## 🔧 Sviluppo
+## 🔧 Development
 
-### Aggiungere una Nuova Skill
+### Adding a New Skill
 
-1. Crea un nuovo file in `skills/nome_skill.py`
-2. Implementa i metodi richiesti ereditando da `BaseSkill`
-3. Registra la skill in `skills/__init__.py`
+1. Create a new file in `skills/nome_skill.py`
+2. Implement the required methods by inheriting from `BaseSkill`
+3. Register the skill in `skills/__init__.py`
 
-### Compilare il Firmware ESP32
+### Compiling the ESP32 Firmware
 
-Assicurati di avere installato:
-- Arduino IDE 2.3.8 o superiore
+Make sure you have installed:
+- Arduino IDE 2.3.8 or higher
 - ESP32 Core 3.x
-- Tutte le librerie elencate sopra
+- All the libraries listed above
 
-## 📄 Licenza
+## 📄 License
 
-Questo progetto è open source. Sentiti libero di modificarlo e distribuirlo.
+This project is open source. Feel free to modify and distribute it.
 
-## 🤝 Contributi
+## 🤝 Contributions
 
-Le contribuzioni sono benvenute! Apri una issue o invia una pull request per migliorare il progetto.
+Contributions are welcome! Open an issue or submit a pull request to improve the project.
 
-## 📞 Supporto
+## 📞 Support
 
-Per problemi o domande, apri una issue su GitHub.
+For issues or questions, please open an issue on GitHub.
 
 ---
 
-**Nota**: Questo progetto richiede una configurazione locale di Ollama, Faster Whisper e Piper TTS per il funzionamento completo.
+**Note**: This project requires a local setup of Ollama, Faster Whisper, and Piper TTS for full functionality.
