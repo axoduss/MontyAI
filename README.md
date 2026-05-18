@@ -7,10 +7,10 @@ A conversational robot based on ESP32-S3 with voice control, animated eye displa
 - **Voice Control**: Speech-to-text via Faster Whisper
 - **Local AI**: Integration with Ollama (Gemma4)
 - **Speech Synthesis**: TTS with Piper
-- **Eye Display**: NeoPixel WS2812 animations to express emotions
+- **Eye Display**: OLED animations to express emotions
 - **Skill System**: Modular architecture to extend functionalities
 - **Bidirectional Audio**: I2S Microphone (INMP441) + I2S Speaker (MAX98357A)
-- **Sensors**: BMP280 (pressure/temperature) + MPU6500 (accelerometer/gyroscope)
+- **Sensors**: BMP280 (pressure/temperature) + MPU6500 (accelerometer/gyroscope) + HC-SR04 (ultrasound) + bumper switch
 - **OTA Updates**: Over-the-air updates for the ESP32 firmware
 
 ## 📁 Project Structure
@@ -33,9 +33,9 @@ A conversational robot based on ESP32-S3 with voice control, animated eye displa
 - **Speaker**: MAX98357A (I2S)
 - **LED**: NeoPixel WS2812
 - **Display**: SS1306
-- **Sensors**: BMP280, MPU6500, 
-- **Motors**:
-- **Bumper**:
+- **Sensors**: BMP280, MPU6500, HC-SR04 (I2C)
+- **Motors**: 2x DRV8871(PWM)
+- **Bumper**: 2x Microswitch ON/OFF
 
 ## 💻 Software Requirements
 
